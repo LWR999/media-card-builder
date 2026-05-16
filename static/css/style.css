@@ -517,3 +517,14 @@ input:focus, select:focus { border-color: var(--accent); }
 
 /* ── Tooltip on tile hover ── */
 .album-tile[title] { cursor: pointer; }
+
+/* ── Button loading state ── */
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  animation: btn-pulse 1s ease-in-out infinite;
+}
+@keyframes btn-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 0.35; }
+}

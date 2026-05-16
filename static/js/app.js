@@ -304,12 +304,19 @@ el('search-genre').addEventListener('input', scheduleSearch);
 // ── Suggestions ────────────────────────────────────────────────────────────
 el('btn-suggest').addEventListener('click', async () => {
   if (!activeCardId) return;
+  const btn = el('btn-suggest');
+  btn.disabled = true;
+  btn.textContent = 'Calculating…';
   try {
     const res = await api('GET', `/api/cards/${activeCardId}/suggestions`);
     suggestions = res.suggestions.map(s => ({ ...s, _pending: true }));
     renderSuggestions();
     renderSpaceBar();
   } catch (e) { showErr(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Fill suggestions';
+  }
 });
 
 function renderSuggestions() {

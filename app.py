@@ -502,12 +502,18 @@ def get_suggestions(card_id):
     scored = sorted(candidates, key=lambda r: (-score(r), r["artist"], r["title"]))
 
     suggestions = []
-    accumulated = 0
-    for row in scored:
-        if accumulated >= fill_target:
+    space_left = fill_target
+    # Cap how many candidates we stat from disk; high-scoring albums come first
+    # so we're unlikely to miss good suggestions by stopping at 800.
+    for row in scored[:800]:
+        if space_left <= 0:
             break
         sz = _album_size_bytes(row["nas_path"])
         if sz == 0:
+            continue
+        # Only suggest the album if the whole thing fits in the remaining space.
+        # Skip albums that are too large and keep trying smaller ones.
+        if sz > space_left:
             continue
         suggestions.append({
             "id": row["id"],
@@ -518,7 +524,7 @@ def get_suggestions(card_id):
             "nas_path": row["nas_path"],
             "size_bytes": sz,
         })
-        accumulated += sz
+        space_left -= sz
 
     return jsonify({
         "suggestions": suggestions,
