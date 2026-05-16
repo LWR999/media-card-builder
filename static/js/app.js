@@ -1,16 +1,17 @@
 /* Media Card Builder – frontend */
 'use strict';
 
-const API = '';
-
 // ── State ──────────────────────────────────────────────────────────────────
 let activeCardId = null;
-let activeCard = null;
-let suggestions = [];
-let buildSSE = null;
-let searchTimer = null;
+let activeCard   = null;
+let suggestions  = [];
+let buildSSE     = null;
+let searchTimer  = null;
+let currentResults = [];   // raw album rows from last search
+let sortBy  = 'artist';
+let sortAsc = true;
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Utilities ──────────────────────────────────────────────────────────────
 function fmt(bytes) {
   if (!bytes) return '0 B';
   const gb = bytes / 1073741824;
@@ -26,7 +27,7 @@ async function api(method, path, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(API + path, opts);
+  const res = await fetch(path, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -36,44 +37,112 @@ async function api(method, path, body) {
 
 function el(id) { return document.getElementById(id); }
 
-function showErr(msg) {
-  console.error(msg);
-  alert('Error: ' + msg);
-}
+function showErr(msg) { console.error(msg); alert('Error: ' + msg); }
 
 function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;',
-  }[c]));
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])
+  );
 }
 
-// ── Art lazy loading ───────────────────────────────────────────────────────
-const artObserver = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (!entry.isIntersecting) continue;
-    const tile = entry.target;
-    if (tile.dataset.artLoaded) continue;
-    tile.dataset.artLoaded = '1';
-    const img = tile.querySelector('img.tile-img');
-    if (!img) continue;
-    img.onload = () => img.classList.add('loaded');
-    img.onerror = () => {
-      img.style.display = 'none';
+// ── Art loading ────────────────────────────────────────────────────────────
+// Use native loading="lazy" so the browser manages fetch priority.
+// Fade in on load; handle the case where the image is already in cache
+// (complete+naturalWidth check immediately after setting src).
+function makeTileImg(albumId) {
+  const img = document.createElement('img');
+  img.className = 'tile-img';
+  img.loading   = 'lazy';
+  img.decoding  = 'async';
+  img.alt       = '';
+  img.addEventListener('load',  () => { img.style.opacity = '1'; });
+  img.addEventListener('error', () => { img.style.opacity = '0'; });
+  img.src = `/api/albums/${albumId}/art`;
+  // If already cached, 'load' may have fired synchronously before the listener attached
+  if (img.complete && img.naturalWidth > 0) img.style.opacity = '1';
+  return img;
+}
+
+function makeThumbImg(albumId) {
+  const img = document.createElement('img');
+  img.className = 'album-thumb';
+  img.loading   = 'lazy';
+  img.decoding  = 'async';
+  img.alt       = '';
+  img.addEventListener('error', () => { img.style.visibility = 'hidden'; });
+  img.src = `/api/albums/${albumId}/art`;
+  return img;
+}
+
+// ── Resizable panes ────────────────────────────────────────────────────────
+function initResizers() {
+  // Horizontal: library height
+  const libPane  = el('library-pane');
+  const hResizer = el('h-resizer');
+
+  const savedH = localStorage.getItem('libH');
+  libPane.style.height = savedH ? savedH + 'px' : '50vh';
+
+  hResizer.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const startY  = e.clientY;
+    const startH  = libPane.getBoundingClientRect().height;
+    const appH    = el('app').getBoundingClientRect().height;
+    hResizer.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+
+    const onMove = ev => {
+      const h = Math.max(120, Math.min(appH - 120, startH + ev.clientY - startY));
+      libPane.style.height = h + 'px';
     };
-    img.src = `/api/albums/${tile.dataset.albumId}/art`;
-    artObserver.unobserve(tile);
-  }
-}, { rootMargin: '300px' });
+    const onUp = () => {
+      hResizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      localStorage.setItem('libH', libPane.getBoundingClientRect().height);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Vertical: cards pane width
+  const cardsPane = el('cards-pane');
+  const vResizer  = el('v-resizer');
+
+  const savedW = localStorage.getItem('cardsW');
+  cardsPane.style.width = savedW ? savedW + 'px' : '200px';
+
+  vResizer.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const startX  = e.clientX;
+    const startW  = cardsPane.getBoundingClientRect().width;
+    vResizer.classList.add('dragging');
+    document.body.style.cursor = 'ew-resize';
+
+    const onMove = ev => {
+      const w = Math.max(140, Math.min(420, startW + ev.clientX - startX));
+      cardsPane.style.width = w + 'px';
+    };
+    const onUp = () => {
+      vResizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      localStorage.setItem('cardsW', cardsPane.getBoundingClientRect().width);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   localStorage.setItem('theme', t);
 }
-
 el('btn-theme').addEventListener('click', () => {
-  const cur = document.documentElement.getAttribute('data-theme');
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
 });
 applyTheme(localStorage.getItem('theme') || 'dark');
 
@@ -96,81 +165,50 @@ async function loadCards() {
 // ── Select / load card ─────────────────────────────────────────────────────
 async function selectCard(id) {
   activeCardId = id;
-  document.querySelectorAll('#card-list li').forEach(li => {
-    li.classList.toggle('active', Number(li.dataset.id) === id);
-  });
+  document.querySelectorAll('#card-list li').forEach(li =>
+    li.classList.toggle('active', Number(li.dataset.id) === id)
+  );
   el('no-card').classList.add('hidden');
-  el('workspace').classList.remove('hidden');
+  el('card-workspace').classList.remove('hidden');
   await refreshCard();
-  // refresh search to show on-card indicators
-  doSearch();
+  renderTileGrid(); // update on-card indicators
 }
 
 async function refreshCard() {
   if (!activeCardId) return;
   try {
     activeCard = await api('GET', `/api/cards/${activeCardId}`);
-  } catch (e) {
-    showErr(e.message);
-    return;
-  }
-  renderCardSettings();
-  renderCardAlbums();
+  } catch (e) { showErr(e.message); return; }
+  renderCardHeader();
   renderSpaceBar();
-  renderStats();
+  renderCardAlbums();
 }
 
-// ── Card settings ──────────────────────────────────────────────────────────
-function renderCardSettings() {
+// ── Card header ────────────────────────────────────────────────────────────
+function renderCardHeader() {
   const c = activeCard;
   el('card-name-display').textContent = c.name;
-  el('cfg-name').value = c.name;
-  el('cfg-size').value = c.target_size_gb;
-  el('cfg-output').value = c.output_path || '';
-  el('cfg-profile').value = c.device_profile || 'generic';
+  const accepted = c.albums.filter(a => a.accepted);
+  el('card-stats-inline').textContent =
+    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB`;
 }
 
-el('btn-save-settings').addEventListener('click', async () => {
-  try {
-    await api('PATCH', `/api/cards/${activeCardId}`, {
-      name: el('cfg-name').value.trim(),
-      target_size_gb: parseFloat(el('cfg-size').value),
-      output_path: el('cfg-output').value.trim(),
-      device_profile: el('cfg-profile').value,
-    });
-    await loadCards();
-    await refreshCard();
-  } catch (e) { showErr(e.message); }
-});
-
-// ── Stats & space bar ──────────────────────────────────────────────────────
+// ── Space bar ──────────────────────────────────────────────────────────────
 function renderSpaceBar() {
   const c = activeCard;
   const target = c.target_bytes;
-  const used = c.used_bytes;
-  const suggestedBytes = suggestions
-    .filter(s => s._pending)
-    .reduce((a, s) => a + s.size_bytes, 0);
-  const usedPct  = Math.min(used / target * 100, 100);
-  const sugPct   = Math.min(suggestedBytes / target * 100, 100 - usedPct);
-  el('space-used').style.width = usedPct + '%';
+  const used   = c.used_bytes;
+  const suggestedBytes = suggestions.filter(s => s._pending).reduce((a, s) => a + s.size_bytes, 0);
+  const usedPct = Math.min(used / target * 100, 100);
+  const sugPct  = Math.min(suggestedBytes / target * 100, 100 - usedPct);
+  el('space-used').style.width      = usedPct + '%';
   el('space-suggested').style.width = sugPct + '%';
   el('space-used-label').textContent = fmt(used) + ' used';
   el('space-remaining-label').textContent =
-    fmt(Math.max(target - used - suggestedBytes, 0)) + ' remaining of ' +
-    c.target_size_gb + ' GB';
+    fmt(Math.max(target - used - suggestedBytes, 0)) + ' remaining of ' + c.target_size_gb + ' GB';
 }
 
-function renderStats() {
-  const c = activeCard;
-  const accepted = c.albums.filter(a => a.accepted);
-  el('stat-albums').textContent = accepted.length;
-  el('stat-used').textContent = fmt(c.used_bytes);
-  el('stat-remaining').textContent = fmt(Math.max(c.target_bytes - c.used_bytes, 0));
-  el('stat-status').textContent = c.status;
-}
-
-// ── Card albums list (with art thumbs) ─────────────────────────────────────
+// ── Card album list ────────────────────────────────────────────────────────
 function renderCardAlbums() {
   const list = el('card-albums');
   list.innerHTML = '';
@@ -185,37 +223,38 @@ function renderCardAlbums() {
 function buildCardAlbumRow(a) {
   const div = document.createElement('div');
   div.className = 'album-item';
-  div.dataset.albumId = a.album_id;
   if (!a.accepted) div.style.opacity = '0.45';
 
   const badge = a.added_by === 'suggestion'
     ? '<span class="badge-suggestion">suggest</span>' : '';
 
-  div.innerHTML = `
-    <img class="album-thumb" src="/api/albums/${a.album_id}/art"
-         onerror="this.style.visibility='hidden'" alt="">
-    <div class="album-info">
-      <div class="album-title">${esc(a.title)}${badge}</div>
-      <div class="album-sub">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${a.genres ? ' · ' + esc(a.genres) : ''}</div>
-    </div>
-    <span class="album-size">${fmt(a.size_bytes)}</span>
-    <div class="album-actions">
-      <button class="icon-btn small btn-toggle-accept" title="${a.accepted ? 'Exclude' : 'Include'}">
-        ${a.accepted ? '✓' : '○'}
-      </button>
-      <button class="icon-btn small btn-remove-album" title="Remove">✕</button>
-    </div>`;
+  div.appendChild(makeThumbImg(a.album_id));
 
-  div.querySelector('.btn-remove-album').addEventListener('click', async () => {
+  const info = document.createElement('div');
+  info.className = 'album-info';
+  info.innerHTML = `<div class="album-title">${esc(a.title)}${badge}</div>
+    <div class="album-sub">${esc(a.artist)}${a.year ? ' · '+a.year : ''}${a.genres ? ' · '+esc(a.genres) : ''}</div>`;
+  div.appendChild(info);
+
+  const size = document.createElement('span');
+  size.className = 'album-size';
+  size.textContent = fmt(a.size_bytes);
+  div.appendChild(size);
+
+  const actions = document.createElement('div');
+  actions.className = 'album-row-actions';
+  actions.innerHTML = `
+    <button class="icon-btn small btn-toggle" title="${a.accepted ? 'Exclude' : 'Include'}">${a.accepted ? '✓' : '○'}</button>
+    <button class="icon-btn small btn-remove" title="Remove">✕</button>`;
+  div.appendChild(actions);
+
+  actions.querySelector('.btn-remove').addEventListener('click', async () => {
     try {
       await api('DELETE', `/api/cards/${activeCardId}/albums/${a.album_id}`);
-      await refreshCard();
-      doSearch();
-      renderSuggestions();
+      await refreshCard(); renderTileGrid(); renderSuggestions();
     } catch (e) { showErr(e.message); }
   });
-
-  div.querySelector('.btn-toggle-accept').addEventListener('click', async () => {
+  actions.querySelector('.btn-toggle').addEventListener('click', async () => {
     try {
       await api('PATCH', `/api/cards/${activeCardId}/albums/${a.album_id}`, { accepted: !a.accepted });
       await refreshCard();
@@ -225,70 +264,97 @@ function buildCardAlbumRow(a) {
   return div;
 }
 
-// ── Album tile grid ────────────────────────────────────────────────────────
-function renderSearchResults(rows) {
+// ── Tile grid ──────────────────────────────────────────────────────────────
+function sortedResults() {
+  const onCardIds = new Set((activeCard?.albums || []).map(a => a.album_id));
+  return [...currentResults].sort((a, b) => {
+    let va, vb;
+    switch (sortBy) {
+      case 'title':  va = a.title;  vb = b.title;  break;
+      case 'year':   va = a.year || 0; vb = b.year || 0; break;
+      case 'size':   va = a.size_bytes; vb = b.size_bytes; break;
+      default:       va = a.artist; vb = b.artist; break;
+    }
+    const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+    return sortAsc ? cmp : -cmp;
+  });
+}
+
+function renderTileGrid() {
   const grid = el('search-results');
   grid.innerHTML = '';
 
+  const rows = sortedResults();
+  const onCardIds = new Set((activeCard?.albums || []).map(a => a.album_id));
+
   el('search-count').textContent = rows.length ? `${rows.length} albums` : 'No results';
 
-  const onCardIds = new Set(
-    (activeCard?.albums || []).map(a => a.album_id)
-  );
-
   for (const r of rows) {
-    const tile = document.createElement('div');
     const isOnCard = r.on_card || onCardIds.has(r.id);
+    const tile = document.createElement('div');
     tile.className = 'album-tile' + (isOnCard ? ' on-card' : '');
     tile.dataset.albumId = r.id;
-    tile.title = `${r.artist} – ${r.title}${r.year ? ' (' + r.year + ')' : ''}${r.genres ? '\n' + r.genres : ''}\n${fmt(r.size_bytes)}`;
+    tile.title = `${r.artist} – ${r.title}${r.year ? ' ('+r.year+')' : ''}` +
+                 `${r.genres ? '\n'+r.genres : ''}\n${fmt(r.size_bytes)}`;
 
-    tile.innerHTML = `
-      <div class="art-placeholder"></div>
-      <img class="tile-img" alt="">
-      <div class="album-tile-overlay">
-        <div class="album-tile-title">${esc(r.title)}</div>
-        <div class="album-tile-artist">${esc(r.artist)}</div>
-      </div>
-      ${isOnCard ? '<div class="tile-check">✓</div>' : ''}`;
+    tile.appendChild(makeTileImg(r.id));
 
-    if (!isOnCard) {
+    const overlay = document.createElement('div');
+    overlay.className = 'album-tile-overlay';
+    overlay.innerHTML = `<div class="album-tile-title">${esc(r.title)}</div>
+      <div class="album-tile-artist">${esc(r.artist)}</div>`;
+    tile.appendChild(overlay);
+
+    if (isOnCard) {
+      const chk = document.createElement('div');
+      chk.className = 'tile-check';
+      chk.textContent = '✓';
+      tile.appendChild(chk);
+    } else {
       const handler = async () => {
         if (!activeCardId) { alert('Select a card first.'); return; }
         try {
           await api('POST', `/api/cards/${activeCardId}/albums`, { album_id: r.id });
           tile.classList.add('on-card');
           tile.removeEventListener('click', handler);
-          if (!tile.querySelector('.tile-check')) {
-            const chk = document.createElement('div');
-            chk.className = 'tile-check';
-            chk.textContent = '✓';
-            tile.appendChild(chk);
-          }
+          const chk = document.createElement('div');
+          chk.className = 'tile-check';
+          chk.textContent = '✓';
+          tile.appendChild(chk);
           await refreshCard();
         } catch (e) { showErr(e.message); }
       };
       tile.addEventListener('click', handler);
     }
 
-    artObserver.observe(tile);
     grid.appendChild(tile);
   }
 }
 
-// ── Search / filter ────────────────────────────────────────────────────────
+// ── Sort controls ──────────────────────────────────────────────────────────
+el('sort-by').addEventListener('change', () => {
+  sortBy = el('sort-by').value;
+  renderTileGrid();
+});
+el('btn-sort-dir').addEventListener('click', () => {
+  sortAsc = !sortAsc;
+  el('btn-sort-dir').textContent = sortAsc ? '↑' : '↓';
+  renderTileGrid();
+});
+
+// ── Search / filters ───────────────────────────────────────────────────────
 async function doSearch() {
-  const q = el('search-q').value.trim();
+  const q      = el('search-q').value.trim();
   const artist = el('search-artist').value.trim();
-  const genre = el('search-genre').value.trim();
+  const genre  = el('search-genre').value.trim();
   try {
-    const params = new URLSearchParams({ limit: 300 });
-    if (q) params.set('q', q);
+    const params = new URLSearchParams({ limit: 400 });
+    if (q)      params.set('q', q);
     if (artist) params.set('artist', artist);
-    if (genre) params.set('genre', genre);
+    if (genre)  params.set('genre', genre);
     if (activeCardId) params.set('card_id', activeCardId);
-    const rows = await api('GET', `/api/albums/search?${params}`);
-    renderSearchResults(rows);
+    currentResults = await api('GET', `/api/albums/search?${params}`);
+    renderTileGrid();
   } catch (e) { showErr(e.message); }
 }
 
@@ -301,7 +367,7 @@ el('search-q').addEventListener('input', scheduleSearch);
 el('search-artist').addEventListener('input', scheduleSearch);
 el('search-genre').addEventListener('input', scheduleSearch);
 
-// ── Suggestions ────────────────────────────────────────────────────────────
+// ── Fill suggestions ───────────────────────────────────────────────────────
 el('btn-suggest').addEventListener('click', async () => {
   if (!activeCardId) return;
   const btn = el('btn-suggest');
@@ -320,7 +386,7 @@ el('btn-suggest').addEventListener('click', async () => {
 });
 
 function renderSuggestions() {
-  const sec = el('suggestions-section');
+  const sec  = el('suggestions-section');
   const list = el('suggestions-list');
   const pending = suggestions.filter(s => s._pending);
   if (!pending.length) { sec.classList.add('hidden'); return; }
@@ -330,33 +396,36 @@ function renderSuggestions() {
   for (const s of pending) {
     const div = document.createElement('div');
     div.className = 'album-item';
-    div.innerHTML = `
-      <img class="album-thumb" src="/api/albums/${s.id}/art"
-           onerror="this.style.visibility='hidden'" alt="">
-      <div class="album-info">
-        <div class="album-title">${esc(s.title)}</div>
-        <div class="album-sub">${esc(s.artist)}${s.year ? ' · ' + s.year : ''}${s.genres ? ' · ' + esc(s.genres) : ''}</div>
-      </div>
-      <span class="album-size">${fmt(s.size_bytes)}</span>
-      <div class="album-actions">
-        <button class="icon-btn small btn-accept-one" title="Accept">✓</button>
-        <button class="icon-btn small btn-reject-one" title="Reject">✕</button>
-      </div>`;
 
-    div.querySelector('.btn-accept-one').addEventListener('click', async () => {
+    div.appendChild(makeThumbImg(s.id));
+
+    const info = document.createElement('div');
+    info.className = 'album-info';
+    info.innerHTML = `<div class="album-title">${esc(s.title)}</div>
+      <div class="album-sub">${esc(s.artist)}${s.year ? ' · '+s.year : ''}${s.genres ? ' · '+esc(s.genres) : ''}</div>`;
+    div.appendChild(info);
+
+    const size = document.createElement('span');
+    size.className = 'album-size';
+    size.textContent = fmt(s.size_bytes);
+    div.appendChild(size);
+
+    const actions = document.createElement('div');
+    actions.className = 'album-row-actions';
+    actions.innerHTML = `<button class="icon-btn small btn-acc" title="Accept">✓</button>
+      <button class="icon-btn small btn-rej" title="Reject">✕</button>`;
+    div.appendChild(actions);
+
+    actions.querySelector('.btn-acc').addEventListener('click', async () => {
       try {
         await api('POST', `/api/cards/${activeCardId}/suggestions/accept`, { album_ids: [s.id] });
         s._pending = false;
-        await refreshCard();
-        renderSuggestions();
-        doSearch();
+        await refreshCard(); renderSuggestions(); renderTileGrid();
       } catch (e) { showErr(e.message); }
     });
-
-    div.querySelector('.btn-reject-one').addEventListener('click', () => {
+    actions.querySelector('.btn-rej').addEventListener('click', () => {
       s._pending = false;
-      renderSuggestions();
-      renderSpaceBar();
+      renderSuggestions(); renderSpaceBar();
     });
 
     list.appendChild(div);
@@ -371,9 +440,7 @@ el('btn-accept-all').addEventListener('click', async () => {
       album_ids: pending.map(s => s.id),
     });
     suggestions.forEach(s => s._pending = false);
-    await refreshCard();
-    renderSuggestions();
-    doSearch();
+    await refreshCard(); renderSuggestions(); renderTileGrid();
   } catch (e) { showErr(e.message); }
 });
 
@@ -386,15 +453,9 @@ el('btn-dismiss-suggestions').addEventListener('click', () => {
 // ── Build ──────────────────────────────────────────────────────────────────
 el('btn-build').addEventListener('click', async () => {
   if (!activeCardId) return;
-  const outputPath = el('cfg-output').value.trim();
-  if (!outputPath) { alert('Set an output path before building.'); return; }
+  const output = activeCard?.output_path;
+  if (!output) { alert('Set an output path in Settings before building.'); return; }
   try {
-    await api('PATCH', `/api/cards/${activeCardId}`, {
-      name: el('cfg-name').value.trim(),
-      target_size_gb: parseFloat(el('cfg-size').value),
-      output_path: outputPath,
-      device_profile: el('cfg-profile').value,
-    });
     await api('POST', `/api/cards/${activeCardId}/build`);
     startBuildSSE();
   } catch (e) { showErr(e.message); }
@@ -407,45 +468,75 @@ function startBuildSSE() {
   buildSSE = new EventSource(`/api/cards/${activeCardId}/build/stream`);
   buildSSE.onmessage = e => {
     const d = JSON.parse(e.data);
-    el('build-bar').style.width = (d.pct || 0) + '%';
-    el('build-pct').textContent = (d.pct || 0) + '%';
-    el('build-eta').textContent = d.eta_secs != null ? 'ETA ' + fmtDuration(d.eta_secs) : '';
+    el('build-bar').style.width  = (d.pct || 0) + '%';
+    el('build-pct').textContent  = (d.pct || 0) + '%';
+    el('build-eta').textContent  = d.eta_secs != null ? 'ETA ' + fmtDur(d.eta_secs) : '';
     el('build-current').textContent = d.current_album || '';
-    if (d.new_log && d.new_log.length) {
+    if (d.new_log?.length) {
       el('build-log').textContent += d.new_log.join('\n') + '\n';
       el('build-log').scrollTop = el('build-log').scrollHeight;
     }
     if (d.status === 'done' || d.status === 'error') {
-      buildSSE.close(); buildSSE = null;
-      refreshCard();
+      buildSSE.close(); buildSSE = null; refreshCard();
     }
   };
   buildSSE.onerror = () => { if (buildSSE) { buildSSE.close(); buildSSE = null; } };
 }
 
-function fmtDuration(secs) {
-  if (secs < 60) return secs + 's';
-  return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+function fmtDur(s) {
+  return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
 }
+
+// ── Card settings modal ────────────────────────────────────────────────────
+el('btn-card-settings').addEventListener('click', () => {
+  if (!activeCard) return;
+  el('cfg-name').value    = activeCard.name;
+  el('cfg-size').value    = activeCard.target_size_gb;
+  el('cfg-output').value  = activeCard.output_path || '';
+  el('cfg-profile').value = activeCard.device_profile || 'generic';
+  el('modal-card-settings').classList.remove('hidden');
+});
+
+el('btn-save-settings').addEventListener('click', async () => {
+  try {
+    await api('PATCH', `/api/cards/${activeCardId}`, {
+      name:           el('cfg-name').value.trim(),
+      target_size_gb: parseFloat(el('cfg-size').value),
+      output_path:    el('cfg-output').value.trim(),
+      device_profile: el('cfg-profile').value,
+    });
+    el('modal-card-settings').classList.add('hidden');
+    await loadCards();
+    await refreshCard();
+  } catch (e) { showErr(e.message); }
+});
+
+el('btn-delete-card').addEventListener('click', async () => {
+  if (!activeCard) return;
+  if (!confirm(`Delete card "${activeCard.name}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/cards/${activeCardId}`);
+    el('modal-card-settings').classList.add('hidden');
+    activeCardId = null; activeCard = null;
+    el('card-workspace').classList.add('hidden');
+    el('no-card').classList.remove('hidden');
+    await loadCards();
+  } catch (e) { showErr(e.message); }
+});
 
 // ── New card modal ──────────────────────────────────────────────────────────
 el('btn-new-card').addEventListener('click', () => el('modal-new-card').classList.remove('hidden'));
-document.querySelectorAll('.modal-close').forEach(btn => {
-  btn.addEventListener('click', () => btn.closest('.modal').classList.add('hidden'));
-});
-el('modal-new-card').addEventListener('click', e => {
-  if (e.target === el('modal-new-card')) el('modal-new-card').classList.add('hidden');
-});
 
 el('btn-create-card').addEventListener('click', async () => {
-  const name = el('new-card-name').value.trim();
-  const size = parseFloat(el('new-card-size').value);
-  const output = el('new-card-output').value.trim();
-  const profile = el('new-card-profile').value;
+  const name  = el('new-card-name').value.trim();
+  const size  = parseFloat(el('new-card-size').value);
   if (!name || !size) { alert('Name and size are required.'); return; }
   try {
     const { id } = await api('POST', '/api/cards', {
-      name, target_size_gb: size, output_path: output, device_profile: profile,
+      name,
+      target_size_gb: size,
+      output_path:    el('new-card-output').value.trim(),
+      device_profile: el('new-card-profile').value,
     });
     el('modal-new-card').classList.add('hidden');
     el('new-card-name').value = '';
@@ -456,19 +547,15 @@ el('btn-create-card').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
-// ── Delete card ────────────────────────────────────────────────────────────
-el('btn-delete-card').addEventListener('click', async () => {
-  if (!activeCardId) return;
-  if (!confirm(`Delete card "${activeCard?.name}"? This cannot be undone.`)) return;
-  try {
-    await api('DELETE', `/api/cards/${activeCardId}`);
-    activeCardId = null; activeCard = null;
-    el('workspace').classList.add('hidden');
-    el('no-card').classList.remove('hidden');
-    await loadCards();
-  } catch (e) { showErr(e.message); }
-});
+// ── Modal close helpers ────────────────────────────────────────────────────
+document.querySelectorAll('.modal-close').forEach(btn =>
+  btn.addEventListener('click', () => btn.closest('.modal').classList.add('hidden'))
+);
+document.querySelectorAll('.modal').forEach(m =>
+  m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); })
+);
 
 // ── Init ───────────────────────────────────────────────────────────────────
+initResizers();
 loadCards();
 doSearch();
