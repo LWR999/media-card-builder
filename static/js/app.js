@@ -295,7 +295,7 @@ function renderTileGrid() {
     tile.className = 'album-tile' + (isOnCard ? ' on-card' : '');
     tile.dataset.albumId = r.id;
     tile.title = `${r.artist} – ${r.title}${r.year ? ' ('+r.year+')' : ''}` +
-                 `${r.genres ? '\n'+r.genres : ''}\n${fmt(r.size_bytes)}`;
+                 `${r.genres ? '\n'+r.genres : ''}`;
 
     tile.appendChild(makeTileImg(r.id));
 
@@ -348,7 +348,7 @@ async function doSearch() {
   const artist = el('search-artist').value.trim();
   const genre  = el('search-genre').value.trim();
   try {
-    const params = new URLSearchParams({ limit: 400 });
+    const params = new URLSearchParams({ limit: 20000 });
     if (q)      params.set('q', q);
     if (artist) params.set('artist', artist);
     if (genre)  params.set('genre', genre);

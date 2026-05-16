@@ -306,7 +306,7 @@ def search_albums():
     q = request.args.get("q", "").strip()
     artist = request.args.get("artist", "").strip()
     genre = request.args.get("genre", "").strip()
-    limit = min(int(request.args.get("limit", 200)), 400)
+    limit = min(int(request.args.get("limit", 20000)), 20000)
     card_id = request.args.get("card_id", type=int)
 
     conditions = []
@@ -346,7 +346,11 @@ def search_albums():
                 ORDER BY ar.sort_name, al.title
                 LIMIT %s
             """, params + [limit])
-            rows = _enrich_albums([dict(r) for r in cur.fetchall()])
+            # Don't stat disk for search results — tiles don't show sizes.
+            # Sizes are computed only for albums actually on a card.
+            rows = [dict(r) for r in cur.fetchall()]
+            for row in rows:
+                row["size_bytes"] = 0
 
             # mark which are already on this card
             if card_id:
