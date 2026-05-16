@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media Card Builder</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <h1>Media Card Builder</h1>
+  </div>
+  <div class="header-right">
+    <button id="btn-theme" class="icon-btn" title="Toggle theme">◐</button>
+    <button id="btn-new-card" class="btn-primary">+ New Card</button>
+  </div>
+</header>
+
+<div id="app">
+  <!-- Card list sidebar -->
+  <aside id="card-list-panel">
+    <div class="panel-header">Cards</div>
+    <ul id="card-list"></ul>
+  </aside>
+
+  <!-- No card selected -->
+  <div id="no-card" class="empty-state">
+    <p>Select or create a card to get started.</p>
+  </div>
+
+  <!-- Main workspace (hidden until card selected) -->
+  <div id="workspace" class="hidden">
+    <!-- Left: Album browser -->
+    <section id="search-panel">
+      <div class="panel-header">
+        Library
+        <span id="search-count" class="search-count"></span>
+      </div>
+      <div class="search-filters">
+        <input id="search-q" type="text" placeholder="Title or artist…" autocomplete="off">
+        <div class="filter-row">
+          <input id="search-artist" type="text" placeholder="Artist…" autocomplete="off">
+          <input id="search-genre" type="text" placeholder="Genre…" autocomplete="off">
+        </div>
+      </div>
+      <div id="search-results" class="album-grid"></div>
+    </section>
+
+    <!-- Centre: Card contents -->
+    <section id="card-panel">
+      <div class="panel-header">
+        <span id="card-name-display">Card</span>
+        <button id="btn-suggest" class="btn-secondary small">Fill suggestions</button>
+      </div>
+
+      <!-- Space bar -->
+      <div class="space-bar-wrap">
+        <div class="space-bar">
+          <div id="space-used" class="space-segment user-fill"></div>
+          <div id="space-suggested" class="space-segment suggestion-fill"></div>
+        </div>
+        <div class="space-labels">
+          <span id="space-used-label">0 GB used</span>
+          <span id="space-remaining-label">-- remaining of -- GB</span>
+        </div>
+      </div>
+
+      <div id="card-albums" class="album-list"></div>
+
+      <!-- Suggestions section -->
+      <div id="suggestions-section" class="hidden">
+        <div class="section-header">
+          Suggestions
+          <button id="btn-accept-all" class="btn-secondary small">Accept all</button>
+          <button id="btn-dismiss-suggestions" class="icon-btn small">✕</button>
+        </div>
+        <div id="suggestions-list" class="album-list"></div>
+      </div>
+
+      <div class="card-actions">
+        <button id="btn-build" class="btn-primary">Build Card</button>
+      </div>
+    </section>
+
+    <!-- Right: Stats & build -->
+    <section id="stats-panel">
+      <div class="panel-header">Card Settings</div>
+      <div class="stats-form">
+        <label>Name
+          <input id="cfg-name" type="text">
+        </label>
+        <label>Target size
+          <div class="input-row">
+            <input id="cfg-size" type="number" min="1" max="2048" step="0.5">
+            <span class="unit">GB</span>
+          </div>
+        </label>
+        <label>Output path
+          <input id="cfg-output" type="text" placeholder="/media/SDCARD">
+        </label>
+        <label>Device profile
+          <select id="cfg-profile">
+            <option value="generic">Generic</option>
+            <option value="bentley">Bentley</option>
+            <option value="car">Car Stereo</option>
+          </select>
+        </label>
+        <button id="btn-save-settings" class="btn-secondary">Save settings</button>
+      </div>
+
+      <hr>
+
+      <div class="panel-header">Stats</div>
+      <dl id="stats-dl">
+        <dt>Albums</dt><dd id="stat-albums">0</dd>
+        <dt>Used</dt><dd id="stat-used">0 GB</dd>
+        <dt>Remaining</dt><dd id="stat-remaining">--</dd>
+        <dt>Status</dt><dd id="stat-status">--</dd>
+      </dl>
+
+      <hr>
+
+      <!-- Build progress -->
+      <div id="build-section" class="hidden">
+        <div class="panel-header">Build Progress</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div id="build-bar" class="progress-fill"></div></div>
+          <div class="progress-info">
+            <span id="build-pct">0%</span>
+            <span id="build-eta"></span>
+          </div>
+        </div>
+        <div id="build-current" class="build-current"></div>
+        <pre id="build-log" class="build-log"></pre>
+      </div>
+
+      <button id="btn-delete-card" class="btn-danger">Delete Card</button>
+    </section>
+  </div>
+</div>
+
+<!-- Modal: new card -->
+<div id="modal-new-card" class="modal hidden">
+  <div class="modal-box">
+    <h2>New Card</h2>
+    <label>Name <input id="new-card-name" type="text" placeholder="Road Trip 2024"></label>
+    <label>Target size (GB) <input id="new-card-size" type="number" min="1" max="2048" step="0.5" value="32"></label>
+    <label>Output path <input id="new-card-output" type="text" placeholder="/media/SDCARD"></label>
+    <label>Device profile
+      <select id="new-card-profile">
+        <option value="generic">Generic</option>
+        <option value="bentley">Bentley</option>
+        <option value="car">Car Stereo</option>
+      </select>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-create-card" class="btn-primary">Create</button>
+      <button class="btn-secondary modal-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
