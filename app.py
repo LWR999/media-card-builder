@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import time
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +15,7 @@ from mutagen.flac import FLAC
 from PIL import Image
 
 from builder import job as build_job
+from builder import sync as sync_job
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -21,13 +23,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 
-NAS_ROOT = os.environ.get("NAS_MUSIC_PATH", "").rstrip("/")
+NAS_ROOT  = os.environ.get("NAS_MUSIC_PATH", "").rstrip("/")
+NAS_STAGE = os.environ.get("NAS_STAGE_PATH", "").rstrip("/")
 
 DB_PARAMS = {
-    "host": os.environ.get("DB_HOST", "localhost"),
-    "port": int(os.environ.get("DB_PORT", 5432)),
-    "dbname": os.environ.get("DB_NAME", "music_catalog"),
-    "user": os.environ.get("DB_USER", ""),
+    "host":     os.environ.get("DB_HOST", "localhost"),
+    "port":     int(os.environ.get("DB_PORT", 5432)),
+    "dbname":   os.environ.get("DB_NAME", "music_catalog"),
+    "user":     os.environ.get("DB_USER", ""),
     "password": os.environ.get("DB_PASSWORD", ""),
 }
 
@@ -41,21 +44,44 @@ def dict_cursor(conn):
 
 
 # ---------------------------------------------------------------------------
+# Stage path helpers
+# ---------------------------------------------------------------------------
+
+def _safe_name(s: str) -> str:
+    return re.sub(r"[^\w\-]", "_", s)[:60].strip("_")
+
+
+def _stage_path(card: dict) -> Path | None:
+    if not NAS_STAGE:
+        return None
+    folder = f"{card['id']}_{_safe_name(card['name'])}"
+    return Path(NAS_STAGE) / folder
+
+
+# ---------------------------------------------------------------------------
 # Schema bootstrap
 # ---------------------------------------------------------------------------
 
 def ensure_tables():
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Migrate output_path → card_mount_path if this is an older instance
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE cards RENAME COLUMN output_path TO card_mount_path;
+                EXCEPTION WHEN undefined_column THEN NULL;
+                END $$;
+            """)
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS cards (
-                    id            SERIAL PRIMARY KEY,
-                    name          VARCHAR(500)  NOT NULL,
-                    target_size_gb NUMERIC(10,2) NOT NULL,
-                    output_path   VARCHAR(2000),
-                    device_profile VARCHAR(100) DEFAULT 'generic',
-                    status        VARCHAR(50)  NOT NULL DEFAULT 'draft',
-                    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+                    id               SERIAL PRIMARY KEY,
+                    name             VARCHAR(500)  NOT NULL,
+                    target_size_gb   NUMERIC(10,2) NOT NULL,
+                    card_mount_path  VARCHAR(2000),
+                    device_profile   VARCHAR(100) DEFAULT 'generic',
+                    status           VARCHAR(50)  NOT NULL DEFAULT 'draft',
+                    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
                 );
 
                 CREATE TABLE IF NOT EXISTS card_albums (
@@ -69,11 +95,16 @@ def ensure_tables():
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_card_albums_card_id ON card_albums(card_id);
+
+                CREATE TABLE IF NOT EXISTS card_unmanaged_paths (
+                    id          SERIAL PRIMARY KEY,
+                    card_id     INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+                    folder_name VARCHAR(2000) NOT NULL,
+                    size_bytes  BIGINT NOT NULL DEFAULT 0,
+                    UNIQUE (card_id, folder_name)
+                );
             """)
-            # fix legacy default if column was created with wrong default
-            cur.execute("""
-                ALTER TABLE cards ALTER COLUMN status SET DEFAULT 'draft'
-            """)
+            cur.execute("ALTER TABLE cards ALTER COLUMN status SET DEFAULT 'draft'")
         conn.commit()
 
 
@@ -194,7 +225,7 @@ def list_cards():
     with get_conn() as conn:
         with dict_cursor(conn) as cur:
             cur.execute("""
-                SELECT c.id, c.name, c.target_size_gb, c.output_path,
+                SELECT c.id, c.name, c.target_size_gb, c.card_mount_path,
                        c.device_profile, c.status, c.created_at,
                        COUNT(ca.album_id) FILTER (WHERE ca.accepted) AS album_count
                 FROM cards c
@@ -202,7 +233,12 @@ def list_cards():
                 GROUP BY c.id
                 ORDER BY c.created_at DESC
             """)
-            return jsonify([dict(r) for r in cur.fetchall()])
+            cards = [dict(r) for r in cur.fetchall()]
+    for c in cards:
+        sp = _stage_path(c)
+        c["stage_path"]   = str(sp) if sp else None
+        c["stage_exists"] = sp.exists() if sp else False
+    return jsonify(cards)
 
 
 @app.post("/api/cards")
@@ -219,9 +255,10 @@ def create_card():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO cards (name, target_size_gb, output_path, device_profile)
+                """INSERT INTO cards (name, target_size_gb, card_mount_path, device_profile)
                    VALUES (%s, %s, %s, %s) RETURNING id""",
-                (name, target_gb, data.get("output_path"), data.get("device_profile", "generic")),
+                (name, target_gb,
+                 data.get("card_mount_path"), data.get("device_profile", "generic")),
             )
             card_id = cur.fetchone()[0]
         conn.commit()
@@ -247,6 +284,7 @@ def get_card(card_id):
             card = cur.fetchone()
             if not card:
                 return jsonify({"error": "not found"}), 404
+            card = dict(card)
 
             cur.execute("""
                 SELECT ca.album_id, ca.added_by, ca.accepted,
@@ -265,12 +303,27 @@ def get_card(card_id):
             """, (card_id,))
             albums = _enrich_albums([dict(r) for r in cur.fetchall()])
 
-            result = dict(card)
-            result["albums"] = albums
-            used_bytes = sum(a["size_bytes"] for a in albums if a["accepted"])
-            result["used_bytes"] = used_bytes
-            result["target_bytes"] = int(float(card["target_size_gb"]) * 1024 ** 3)
-            return jsonify(result)
+            cur.execute("""
+                SELECT id, folder_name, size_bytes
+                FROM card_unmanaged_paths WHERE card_id = %s
+                ORDER BY folder_name
+            """, (card_id,))
+            unmanaged = [dict(r) for r in cur.fetchall()]
+
+    sp = _stage_path(card)
+    album_bytes    = sum(a["size_bytes"] for a in albums if a["accepted"])
+    unmanaged_bytes = sum(u["size_bytes"] for u in unmanaged)
+
+    result = card
+    result["albums"]           = albums
+    result["unmanaged_paths"]  = unmanaged
+    result["album_bytes"]      = album_bytes
+    result["unmanaged_bytes"]  = unmanaged_bytes
+    result["used_bytes"]       = album_bytes + unmanaged_bytes
+    result["target_bytes"]     = int(float(card["target_size_gb"]) * 1024 ** 3)
+    result["stage_path"]       = str(sp) if sp else None
+    result["stage_exists"]     = sp.exists() if sp else False
+    return jsonify(result)
 
 
 @app.patch("/api/cards/<int:card_id>")
@@ -278,7 +331,7 @@ def update_card(card_id):
     data = request.json or {}
     fields = []
     vals = []
-    for col in ("name", "output_path", "device_profile", "target_size_gb"):
+    for col in ("name", "card_mount_path", "device_profile", "target_size_gb"):
         if col in data:
             fields.append(f"{col} = %s")
             vals.append(data[col])
@@ -303,13 +356,13 @@ def update_card(card_id):
 
 @app.get("/api/albums/search")
 def search_albums():
-    q = request.args.get("q", "").strip()
+    q      = request.args.get("q", "").strip()
     artist = request.args.get("artist", "").strip()
-    genre = request.args.get("genre", "").strip()
-    limit = min(int(request.args.get("limit", 20000)), 20000)
+    genre  = request.args.get("genre", "").strip()
+    limit  = min(int(request.args.get("limit", 20000)), 20000)
     card_id = request.args.get("card_id", type=int)
 
-    conditions = []
+    conditions: list[str] = []
     params: list = []
 
     if q:
@@ -346,17 +399,13 @@ def search_albums():
                 ORDER BY ar.sort_name, al.title
                 LIMIT %s
             """, params + [limit])
-            # Don't stat disk for search results — tiles don't show sizes.
-            # Sizes are computed only for albums actually on a card.
             rows = [dict(r) for r in cur.fetchall()]
             for row in rows:
                 row["size_bytes"] = 0
 
-            # mark which are already on this card
             if card_id:
                 cur.execute(
-                    "SELECT album_id FROM card_albums WHERE card_id = %s",
-                    (card_id,),
+                    "SELECT album_id FROM card_albums WHERE card_id = %s", (card_id,)
                 )
                 on_card = {r["album_id"] for r in cur.fetchall()}
                 for row in rows:
@@ -374,7 +423,7 @@ def search_albums():
 
 @app.post("/api/cards/<int:card_id>/albums")
 def add_album(card_id):
-    data = request.json or {}
+    data     = request.json or {}
     album_id = data.get("album_id")
     added_by = data.get("added_by", "user")
     if not album_id:
@@ -410,7 +459,7 @@ def remove_album(card_id, album_id):
 
 @app.patch("/api/cards/<int:card_id>/albums/<int:album_id>")
 def patch_album(card_id, album_id):
-    data = request.json or {}
+    data     = request.json or {}
     accepted = data.get("accepted")
     if accepted is None:
         return jsonify({"error": "accepted required"}), 400
@@ -419,6 +468,24 @@ def patch_album(card_id, album_id):
             cur.execute(
                 "UPDATE card_albums SET accepted = %s WHERE card_id = %s AND album_id = %s RETURNING card_id",
                 (bool(accepted), card_id, album_id),
+            )
+            if not cur.fetchone():
+                return jsonify({"error": "not found"}), 404
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Routes – unmanaged paths
+# ---------------------------------------------------------------------------
+
+@app.delete("/api/cards/<int:card_id>/unmanaged/<int:path_id>")
+def delete_unmanaged(card_id, path_id):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM card_unmanaged_paths WHERE id = %s AND card_id = %s RETURNING id",
+                (path_id, card_id),
             )
             if not cur.fetchone():
                 return jsonify({"error": "not found"}), 404
@@ -441,7 +508,6 @@ def get_suggestions(card_id):
 
             target_bytes = int(float(card["target_size_gb"]) * 1024 ** 3)
 
-            # Get seed albums already on the card
             cur.execute("""
                 SELECT al.id, al.artist_id, al.year AS release_year, al.nas_path,
                        al.title, ar.name AS artist
@@ -450,12 +516,11 @@ def get_suggestions(card_id):
                 JOIN artists ar ON ar.id = al.artist_id
                 WHERE ca.card_id = %s AND ca.accepted = true
             """, (card_id,))
-            seed_rows = cur.fetchall()
-            seed_ids = {r["id"] for r in seed_rows}
+            seed_rows      = cur.fetchall()
+            seed_ids       = {r["id"] for r in seed_rows}
             seed_artist_ids = {r["artist_id"] for r in seed_rows}
-            seed_years = [r["release_year"] for r in seed_rows if r["release_year"]]
+            seed_years     = [r["release_year"] for r in seed_rows if r["release_year"]]
 
-            # Seed genres
             if seed_ids:
                 cur.execute("""
                     SELECT DISTINCT genre_id FROM album_genres
@@ -465,16 +530,14 @@ def get_suggestions(card_id):
             else:
                 seed_genre_ids = set()
 
-            # Current used bytes
             used_bytes = sum(_album_size_bytes(r["nas_path"]) for r in seed_rows)
-            remaining = target_bytes - used_bytes
-            buffer = int(target_bytes * 0.02)
+            remaining  = target_bytes - used_bytes
+            buffer     = int(target_bytes * 0.02)
             fill_target = remaining - buffer
 
             if fill_target <= 0:
                 return jsonify({"suggestions": [], "remaining_bytes": remaining})
 
-            # Candidate albums – score and sort
             cur.execute("""
                 SELECT al.id, al.title, ar.name AS artist, al.year,
                        al.nas_path, al.is_compilation, al.artist_id,
@@ -485,7 +548,8 @@ def get_suggestions(card_id):
                 LEFT JOIN album_genres ag ON ag.album_id = al.id
                 LEFT JOIN genres g ON g.id = ag.genre_id
                 WHERE al.id != ALL(%s)
-                GROUP BY al.id, al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.artist_id
+                GROUP BY al.id, al.title, ar.name, ar.sort_name, al.year,
+                         al.nas_path, al.is_compilation, al.artist_id
                 ORDER BY ar.sort_name, al.title
             """, (list(seed_ids) if seed_ids else [0],))
             candidates = cur.fetchall()
@@ -506,43 +570,36 @@ def get_suggestions(card_id):
     scored = sorted(candidates, key=lambda r: (-score(r), r["artist"], r["title"]))
 
     suggestions = []
-    space_left = fill_target
-    # Cap how many candidates we stat from disk; high-scoring albums come first
-    # so we're unlikely to miss good suggestions by stopping at 800.
+    space_left  = fill_target
     for row in scored[:800]:
         if space_left <= 0:
             break
         sz = _album_size_bytes(row["nas_path"])
-        if sz == 0:
-            continue
-        # Only suggest the album if the whole thing fits in the remaining space.
-        # Skip albums that are too large and keep trying smaller ones.
-        if sz > space_left:
+        if sz == 0 or sz > space_left:
             continue
         suggestions.append({
-            "id": row["id"],
-            "title": row["title"],
-            "artist": row["artist"],
-            "year": row["year"],
-            "genres": row["genres"],
-            "nas_path": row["nas_path"],
+            "id":        row["id"],
+            "title":     row["title"],
+            "artist":    row["artist"],
+            "year":      row["year"],
+            "genres":    row["genres"],
+            "nas_path":  row["nas_path"],
             "size_bytes": sz,
         })
         space_left -= sz
 
     return jsonify({
-        "suggestions": suggestions,
+        "suggestions":     suggestions,
         "remaining_bytes": remaining,
-        "used_bytes": used_bytes,
-        "target_bytes": target_bytes,
+        "used_bytes":      used_bytes,
+        "target_bytes":    target_bytes,
     })
 
 
 @app.post("/api/cards/<int:card_id>/suggestions/accept")
 def accept_suggestions(card_id):
-    """Accept a list of album_ids as suggestions (or all if album_ids omitted)."""
-    data = request.json or {}
-    album_ids = data.get("album_ids")  # None means "accept all previously returned"
+    data      = request.json or {}
+    album_ids = data.get("album_ids")
     if not album_ids:
         return jsonify({"error": "album_ids required"}), 400
 
@@ -566,11 +623,23 @@ def accept_suggestions(card_id):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/cards/<int:card_id>/build")
-def start_build(card_id):
-    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT)
+def start_build_route(card_id):
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if not card:
+                return jsonify({"error": "not found"}), 404
+            card = dict(card)
+
+    stage = _stage_path(card)
+    if not stage:
+        return jsonify({"error": "NAS_STAGE_PATH not configured in .env"}), 500
+
+    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage))
     if not started:
         return jsonify({"error": "already running"}), 409
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "stage_path": str(stage)})
 
 
 @app.get("/api/cards/<int:card_id>/build/status")
@@ -583,7 +652,6 @@ def build_status(card_id):
 
 @app.get("/api/cards/<int:card_id>/build/stream")
 def build_stream(card_id):
-    """SSE stream of build progress."""
     def generate():
         last_log_idx = 0
         while True:
@@ -593,11 +661,11 @@ def build_stream(card_id):
                 break
 
             payload = {
-                "status": state["status"],
+                "status":        state["status"],
                 "current_album": state["current_album"],
-                "done": state["done"],
-                "total": state["total"],
-                "new_log": state["log"][last_log_idx:],
+                "done":          state["done"],
+                "total":         state["total"],
+                "new_log":       state["log"][last_log_idx:],
             }
             last_log_idx = len(state["log"])
 
@@ -608,7 +676,7 @@ def build_stream(card_id):
 
             elapsed = time.time() - state.get("started_at", time.time())
             if state["done"] > 0 and state["total"] > 0:
-                rate = state["done"] / elapsed
+                rate      = state["done"] / elapsed
                 remaining = state["total"] - state["done"]
                 payload["eta_secs"] = int(remaining / rate) if rate > 0 else 0
 
@@ -621,15 +689,218 @@ def build_stream(card_id):
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 # ---------------------------------------------------------------------------
-# Genres list for filter UI
+# Routes – sync
+# ---------------------------------------------------------------------------
+
+@app.post("/api/cards/<int:card_id>/sync")
+def start_sync_route(card_id):
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if not card:
+                return jsonify({"error": "not found"}), 404
+            card = dict(card)
+            cur.execute(
+                "SELECT folder_name FROM card_unmanaged_paths WHERE card_id = %s",
+                (card_id,),
+            )
+            unmanaged = [r["folder_name"] for r in cur.fetchall()]
+
+    if not card.get("card_mount_path"):
+        return jsonify({"error": "card_mount_path not set — add it in Settings"}), 400
+
+    stage = _stage_path(card)
+    if not stage or not stage.exists():
+        return jsonify({"error": "Staging directory not found — build the card first"}), 400
+
+    started = sync_job.start_sync(card_id, str(stage), card["card_mount_path"], unmanaged)
+    if not started:
+        return jsonify({"error": "already running"}), 409
+    return jsonify({"ok": True})
+
+
+@app.get("/api/cards/<int:card_id>/sync/stream")
+def sync_stream(card_id):
+    def generate():
+        last_log_idx = 0
+        while True:
+            state = sync_job.get_job(card_id)
+            if not state:
+                yield f"data: {json.dumps({'status': 'idle'})}\n\n"
+                break
+            payload = {
+                "status":  state["status"],
+                "pct":     state.get("pct", 0),
+                "new_log": state["log"][last_log_idx:],
+            }
+            last_log_idx = len(state["log"])
+            yield f"data: {json.dumps(payload)}\n\n"
+            if state["status"] in ("done", "error"):
+                break
+            time.sleep(1)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes – import from physical card
+# ---------------------------------------------------------------------------
+
+@app.post("/api/cards/<int:card_id>/import-card")
+def import_from_card(card_id):
+    """Scan mounted SD card, match folders to DB albums, flag unmanaged folders."""
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if not card:
+                return jsonify({"error": "not found"}), 404
+            card = dict(card)
+
+    mount = card.get("card_mount_path")
+    if not mount:
+        return jsonify({"error": "card_mount_path not set"}), 400
+
+    mount_path = Path(mount)
+    if not mount_path.exists():
+        return jsonify({"error": f"Mount path not found: {mount}"}), 400
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, nas_path FROM albums")
+            album_by_folder = {Path(r[1]).name: r[0] for r in cur.fetchall()}
+
+    matched_ids = []
+    unmanaged   = []
+
+    for item in sorted(mount_path.iterdir()):
+        if not item.is_dir() or item.name.startswith("."):
+            continue
+        album_id = album_by_folder.get(item.name)
+        if album_id:
+            matched_ids.append(album_id)
+        else:
+            size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
+            unmanaged.append({"folder_name": item.name, "size_bytes": size})
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for album_id in matched_ids:
+                cur.execute("""
+                    INSERT INTO card_albums (card_id, album_id, added_by, accepted)
+                    VALUES (%s, %s, 'user', true)
+                    ON CONFLICT (card_id, album_id) DO NOTHING
+                """, (card_id, album_id))
+            for u in unmanaged:
+                cur.execute("""
+                    INSERT INTO card_unmanaged_paths (card_id, folder_name, size_bytes)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (card_id, folder_name) DO UPDATE SET size_bytes = EXCLUDED.size_bytes
+                """, (card_id, u["folder_name"], u["size_bytes"]))
+        conn.commit()
+
+    return jsonify({
+        "matched":            len(matched_ids),
+        "unmanaged":          len(unmanaged),
+        "unmanaged_folders":  [u["folder_name"] for u in unmanaged],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Routes – export / import card definition
+# ---------------------------------------------------------------------------
+
+@app.get("/api/cards/<int:card_id>/export")
+def export_card_definition(card_id):
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if not card:
+                return jsonify({"error": "not found"}), 404
+            card = dict(card)
+
+            cur.execute("""
+                SELECT ca.added_by, al.nas_path, al.title, ar.name AS artist
+                FROM card_albums ca
+                JOIN albums al ON al.id = ca.album_id
+                JOIN artists ar ON ar.id = al.artist_id
+                WHERE ca.card_id = %s AND ca.accepted = true
+                ORDER BY ar.sort_name, al.title
+            """, (card_id,))
+            albums = [dict(r) for r in cur.fetchall()]
+
+    definition = {
+        "name":             card["name"],
+        "target_size_gb":   float(card["target_size_gb"]),
+        "device_profile":   card["device_profile"],
+        "card_mount_path":  card["card_mount_path"],
+        "albums":           albums,
+        "exported_at":      time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    filename = f"card_{_safe_name(card['name'])}.json"
+    return Response(
+        json.dumps(definition, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/cards/import-definition")
+def import_card_definition():
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO cards (name, target_size_gb, card_mount_path, device_profile)
+                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                (name, data.get("target_size_gb", 32),
+                 data.get("card_mount_path"), data.get("device_profile", "generic")),
+            )
+            card_id = cur.fetchone()[0]
+
+            matched   = 0
+            unmatched = []
+            for a in data.get("albums", []):
+                nas_path = a.get("nas_path", "")
+                cur.execute("SELECT id FROM albums WHERE nas_path = %s", (nas_path,))
+                row = cur.fetchone()
+                if row:
+                    cur.execute("""
+                        INSERT INTO card_albums (card_id, album_id, added_by, accepted)
+                        VALUES (%s, %s, %s, true)
+                        ON CONFLICT DO NOTHING
+                    """, (card_id, row[0], a.get("added_by", "user")))
+                    matched += 1
+                else:
+                    unmatched.append(nas_path)
+        conn.commit()
+
+    return jsonify({
+        "id":              card_id,
+        "matched":         matched,
+        "unmatched":       len(unmatched),
+        "unmatched_paths": unmatched,
+    }), 201
+
+
+# ---------------------------------------------------------------------------
+# Genres
 # ---------------------------------------------------------------------------
 
 @app.get("/api/genres")

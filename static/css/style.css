@@ -567,6 +567,57 @@ input:focus, select:focus { border-color: var(--accent); }
   margin-top: 4px;
 }
 
+/* ── Pane header actions ── */
+.pane-header-actions { display: flex; gap: 2px; }
+
+/* ── Section extras ── */
+.section-badge {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 10px;
+  padding: 0 6px;
+  color: var(--text);
+}
+.section-hint {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: auto;
+}
+
+/* ── Sync progress bar colour ── */
+.sync-fill { background: var(--accent2); }
+
+/* ── Modal extras ── */
+.modal-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: -4px;
+}
+.modal-result {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--success);
+}
+.readonly-field {
+  opacity: 0.6;
+  cursor: default;
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.file-input {
+  padding: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* ── Util ── */
 .hidden { display: none !important; }
 .empty-state { color: var(--muted); font-size: 13px; text-align: center; }

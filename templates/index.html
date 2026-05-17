@@ -50,7 +50,10 @@
     <div id="cards-pane">
       <div class="pane-header">
         <span class="pane-label">Cards</span>
-        <button id="btn-new-card" class="icon-btn" title="New card">＋</button>
+        <div class="pane-header-actions">
+          <button id="btn-import-card" class="icon-btn" title="Import from existing card">⇩</button>
+          <button id="btn-new-card"    class="icon-btn" title="New card">＋</button>
+        </div>
       </div>
       <ul id="card-list"></ul>
     </div>
@@ -70,8 +73,9 @@
           <span id="card-name-display" class="card-title"></span>
           <span id="card-stats-inline" class="card-stats-inline"></span>
           <div class="card-actions">
-            <button id="btn-suggest"      class="btn-secondary small">Fill suggestions</button>
+            <button id="btn-suggest"       class="btn-secondary small">Fill suggestions</button>
             <button id="btn-card-settings" class="btn-secondary small">Settings</button>
+            <button id="btn-sync"          class="btn-secondary small">Sync to card</button>
             <button id="btn-build"         class="btn-primary   small">Build</button>
           </div>
         </div>
@@ -89,11 +93,20 @@
 
         <div id="card-albums" class="album-list"></div>
 
+        <div id="unmanaged-section" class="hidden">
+          <div class="section-header">
+            Unmanaged folders
+            <span id="unmanaged-count" class="section-badge"></span>
+            <span class="section-hint">preserved on sync</span>
+          </div>
+          <div id="unmanaged-list" class="album-list"></div>
+        </div>
+
         <div id="suggestions-section" class="hidden">
           <div class="section-header">
             Suggestions
-            <button id="btn-accept-all"          class="btn-secondary small">Accept all</button>
-            <button id="btn-dismiss-suggestions"  class="icon-btn small">✕</button>
+            <button id="btn-accept-all"         class="btn-secondary small">Accept all</button>
+            <button id="btn-dismiss-suggestions" class="icon-btn small">✕</button>
           </div>
           <div id="suggestions-list" class="album-list"></div>
         </div>
@@ -108,6 +121,17 @@
             </div>
             <div id="build-current" class="build-current"></div>
             <pre id="build-log" class="build-log"></pre>
+          </div>
+        </div>
+
+        <div id="sync-section" class="hidden">
+          <div class="section-header">Sync Progress</div>
+          <div class="build-body">
+            <div class="progress-bar"><div id="sync-bar" class="progress-fill sync-fill"></div></div>
+            <div class="progress-info">
+              <span id="sync-pct">0%</span>
+            </div>
+            <pre id="sync-log" class="build-log"></pre>
           </div>
         </div>
 
@@ -127,7 +151,7 @@
     <label>Target size (GB)
       <input id="new-card-size" type="number" min="1" max="2048" step="0.5" value="32">
     </label>
-    <label>Output path
+    <label>Card mount path
       <input id="new-card-output" type="text" placeholder="/media/SDCARD">
     </label>
     <label>Device profile
@@ -144,6 +168,35 @@
   </div>
 </div>
 
+<!-- ── Modal: import from physical card ── -->
+<div id="modal-import-card" class="modal hidden">
+  <div class="modal-box">
+    <h2>Import from Card</h2>
+    <p class="modal-hint">Creates a new card by scanning an existing SD card's folders and matching them to your library.</p>
+    <label>Name
+      <input id="ic-name" type="text" placeholder="Road Trip 2024">
+    </label>
+    <label>Target size (GB)
+      <input id="ic-size" type="number" min="1" max="2048" step="0.5" value="32">
+    </label>
+    <label>Card mount path
+      <input id="ic-mount" type="text" placeholder="/media/SDCARD">
+    </label>
+    <label>Device profile
+      <select id="ic-profile">
+        <option value="generic">Generic</option>
+        <option value="bentley">Bentley</option>
+        <option value="car">Car Stereo</option>
+      </select>
+    </label>
+    <div id="ic-result" class="modal-result hidden"></div>
+    <div class="modal-actions">
+      <button id="btn-do-import-card" class="btn-primary">Import</button>
+      <button class="btn-secondary modal-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Modal: card settings ── -->
 <div id="modal-card-settings" class="modal hidden">
   <div class="modal-box">
@@ -154,8 +207,11 @@
     <label>Target size (GB)
       <input id="cfg-size" type="number" min="1" max="2048" step="0.5">
     </label>
-    <label>Output path
+    <label>Card mount path
       <input id="cfg-output" type="text" placeholder="/media/SDCARD">
+    </label>
+    <label>Staging path (auto-derived)
+      <input id="cfg-stage" type="text" readonly class="readonly-field">
     </label>
     <label>Device profile
       <select id="cfg-profile">
@@ -166,7 +222,25 @@
     </label>
     <div class="modal-actions">
       <button id="btn-save-settings" class="btn-primary">Save</button>
+      <button id="btn-export-def"    class="btn-secondary">Export definition</button>
+      <button id="btn-import-def"    class="btn-secondary">Import definition</button>
       <button id="btn-delete-card"   class="btn-danger-inline">Delete card</button>
+      <button class="btn-secondary modal-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: import card definition ── -->
+<div id="modal-import-definition" class="modal hidden">
+  <div class="modal-box">
+    <h2>Import Card Definition</h2>
+    <p class="modal-hint">Recreate a card from a previously exported JSON file.</p>
+    <label>JSON file
+      <input id="import-def-file" type="file" accept=".json" class="file-input">
+    </label>
+    <div id="import-def-result" class="modal-result hidden"></div>
+    <div class="modal-actions">
+      <button id="btn-do-import-def" class="btn-primary">Import</button>
       <button class="btn-secondary modal-close">Cancel</button>
     </div>
   </div>

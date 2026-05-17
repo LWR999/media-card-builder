@@ -6,8 +6,9 @@ let activeCardId = null;
 let activeCard   = null;
 let suggestions  = [];
 let buildSSE     = null;
+let syncSSE      = null;
 let searchTimer  = null;
-let currentResults = [];   // raw album rows from last search
+let currentResults = [];
 let sortBy  = 'artist';
 let sortAsc = true;
 
@@ -36,7 +37,6 @@ async function api(method, path, body) {
 }
 
 function el(id) { return document.getElementById(id); }
-
 function showErr(msg) { console.error(msg); alert('Error: ' + msg); }
 
 function esc(s) {
@@ -46,9 +46,6 @@ function esc(s) {
 }
 
 // ── Art loading ────────────────────────────────────────────────────────────
-// Use native loading="lazy" so the browser manages fetch priority.
-// Fade in on load; handle the case where the image is already in cache
-// (complete+naturalWidth check immediately after setting src).
 function makeTileImg(albumId) {
   const img = document.createElement('img');
   img.className = 'tile-img';
@@ -58,7 +55,6 @@ function makeTileImg(albumId) {
   img.addEventListener('load',  () => { img.style.opacity = '1'; });
   img.addEventListener('error', () => { img.style.opacity = '0'; });
   img.src = `/api/albums/${albumId}/art`;
-  // If already cached, 'load' may have fired synchronously before the listener attached
   if (img.complete && img.naturalWidth > 0) img.style.opacity = '1';
   return img;
 }
@@ -76,21 +72,18 @@ function makeThumbImg(albumId) {
 
 // ── Resizable panes ────────────────────────────────────────────────────────
 function initResizers() {
-  // Horizontal: library height
   const libPane  = el('library-pane');
   const hResizer = el('h-resizer');
-
-  const savedH = localStorage.getItem('libH');
+  const savedH   = localStorage.getItem('libH');
   libPane.style.height = savedH ? savedH + 'px' : '50vh';
 
   hResizer.addEventListener('mousedown', e => {
     e.preventDefault();
-    const startY  = e.clientY;
-    const startH  = libPane.getBoundingClientRect().height;
-    const appH    = el('app').getBoundingClientRect().height;
+    const startY = e.clientY;
+    const startH = libPane.getBoundingClientRect().height;
+    const appH   = el('app').getBoundingClientRect().height;
     hResizer.classList.add('dragging');
     document.body.style.cursor = 'ns-resize';
-
     const onMove = ev => {
       const h = Math.max(120, Math.min(appH - 120, startH + ev.clientY - startY));
       libPane.style.height = h + 'px';
@@ -106,20 +99,17 @@ function initResizers() {
     document.addEventListener('mouseup', onUp);
   });
 
-  // Vertical: cards pane width
   const cardsPane = el('cards-pane');
   const vResizer  = el('v-resizer');
-
-  const savedW = localStorage.getItem('cardsW');
+  const savedW    = localStorage.getItem('cardsW');
   cardsPane.style.width = savedW ? savedW + 'px' : '200px';
 
   vResizer.addEventListener('mousedown', e => {
     e.preventDefault();
-    const startX  = e.clientX;
-    const startW  = cardsPane.getBoundingClientRect().width;
+    const startX = e.clientX;
+    const startW = cardsPane.getBoundingClientRect().width;
     vResizer.classList.add('dragging');
     document.body.style.cursor = 'ew-resize';
-
     const onMove = ev => {
       const w = Math.max(140, Math.min(420, startW + ev.clientX - startX));
       cardsPane.style.width = w + 'px';
@@ -134,6 +124,19 @@ function initResizers() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+}
+
+// ── Tile size slider ───────────────────────────────────────────────────────
+function initTileSlider() {
+  const slider = el('tile-size-slider');
+  const saved  = localStorage.getItem('tileSize');
+  if (saved) slider.value = saved;
+  const apply = () => {
+    document.documentElement.style.setProperty('--tile-size', slider.value + 'px');
+    localStorage.setItem('tileSize', slider.value);
+  };
+  apply();
+  slider.addEventListener('input', apply);
 }
 
 // ── Theme ──────────────────────────────────────────────────────────────────
@@ -154,8 +157,9 @@ async function loadCards() {
   for (const c of cards) {
     const li = document.createElement('li');
     li.dataset.id = c.id;
+    const staged = c.stage_exists ? ' · staged' : '';
     li.innerHTML = `<div>${esc(c.name)}</div>
-      <div class="card-meta">${c.target_size_gb} GB · ${c.album_count} albums</div>`;
+      <div class="card-meta">${c.target_size_gb} GB · ${c.album_count} albums${staged}</div>`;
     if (c.id === activeCardId) li.classList.add('active');
     li.addEventListener('click', () => selectCard(c.id));
     ul.appendChild(li);
@@ -171,7 +175,7 @@ async function selectCard(id) {
   el('no-card').classList.add('hidden');
   el('card-workspace').classList.remove('hidden');
   await refreshCard();
-  renderTileGrid(); // update on-card indicators
+  renderTileGrid();
 }
 
 async function refreshCard() {
@@ -182,20 +186,22 @@ async function refreshCard() {
   renderCardHeader();
   renderSpaceBar();
   renderCardAlbums();
+  renderUnmanaged();
 }
 
 // ── Card header ────────────────────────────────────────────────────────────
 function renderCardHeader() {
   const c = activeCard;
   el('card-name-display').textContent = c.name;
-  const accepted = c.albums.filter(a => a.accepted);
+  const accepted  = c.albums.filter(a => a.accepted);
+  const stageInfo = c.stage_exists ? ' · staged ✓' : '';
   el('card-stats-inline').textContent =
-    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB`;
+    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB${stageInfo}`;
 }
 
 // ── Space bar ──────────────────────────────────────────────────────────────
 function renderSpaceBar() {
-  const c = activeCard;
+  const c      = activeCard;
   const target = c.target_bytes;
   const used   = c.used_bytes;
   const suggestedBytes = suggestions.filter(s => s._pending).reduce((a, s) => a + s.size_bytes, 0);
@@ -210,7 +216,7 @@ function renderSpaceBar() {
 
 // ── Card album list ────────────────────────────────────────────────────────
 function renderCardAlbums() {
-  const list = el('card-albums');
+  const list   = el('card-albums');
   list.innerHTML = '';
   const albums = activeCard.albums;
   if (!albums.length) {
@@ -264,16 +270,59 @@ function buildCardAlbumRow(a) {
   return div;
 }
 
+// ── Unmanaged folders ──────────────────────────────────────────────────────
+function renderUnmanaged() {
+  const sec   = el('unmanaged-section');
+  const list  = el('unmanaged-list');
+  const paths = activeCard?.unmanaged_paths || [];
+
+  if (!paths.length) { sec.classList.add('hidden'); return; }
+
+  sec.classList.remove('hidden');
+  el('unmanaged-count').textContent = paths.length;
+  list.innerHTML = '';
+
+  for (const u of paths) {
+    const div = document.createElement('div');
+    div.className = 'album-item';
+
+    const info = document.createElement('div');
+    info.className = 'album-info';
+    info.innerHTML = `<div class="album-title">${esc(u.folder_name)}</div>
+      <div class="album-sub">Not in library</div>`;
+    div.appendChild(info);
+
+    const size = document.createElement('span');
+    size.className = 'album-size';
+    size.textContent = fmt(u.size_bytes);
+    div.appendChild(size);
+
+    const actions = document.createElement('div');
+    actions.className = 'album-row-actions';
+    actions.innerHTML = `<button class="icon-btn small" title="Forget — will be removed from card on next sync">✕</button>`;
+    div.appendChild(actions);
+
+    actions.querySelector('button').addEventListener('click', async () => {
+      if (!confirm(`Forget "${u.folder_name}"?\n\nIt will be deleted from the card on the next sync.`)) return;
+      try {
+        await api('DELETE', `/api/cards/${activeCardId}/unmanaged/${u.id}`);
+        await refreshCard();
+      } catch (e) { showErr(e.message); }
+    });
+
+    list.appendChild(div);
+  }
+}
+
 // ── Tile grid ──────────────────────────────────────────────────────────────
 function sortedResults() {
-  const onCardIds = new Set((activeCard?.albums || []).map(a => a.album_id));
   return [...currentResults].sort((a, b) => {
     let va, vb;
     switch (sortBy) {
-      case 'title':  va = a.title;  vb = b.title;  break;
-      case 'year':   va = a.year || 0; vb = b.year || 0; break;
-      case 'size':   va = a.size_bytes; vb = b.size_bytes; break;
-      default:       va = a.artist; vb = b.artist; break;
+      case 'title': va = a.title;      vb = b.title;      break;
+      case 'year':  va = a.year || 0;  vb = b.year || 0;  break;
+      case 'size':  va = a.size_bytes; vb = b.size_bytes;  break;
+      default:      va = a.artist;     vb = b.artist;      break;
     }
     const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
     return sortAsc ? cmp : -cmp;
@@ -284,7 +333,7 @@ function renderTileGrid() {
   const grid = el('search-results');
   grid.innerHTML = '';
 
-  const rows = sortedResults();
+  const rows      = sortedResults();
   const onCardIds = new Set((activeCard?.albums || []).map(a => a.album_id));
 
   el('search-count').textContent = rows.length ? `${rows.length} albums` : 'No results';
@@ -332,10 +381,7 @@ function renderTileGrid() {
 }
 
 // ── Sort controls ──────────────────────────────────────────────────────────
-el('sort-by').addEventListener('change', () => {
-  sortBy = el('sort-by').value;
-  renderTileGrid();
-});
+el('sort-by').addEventListener('change', () => { sortBy = el('sort-by').value; renderTileGrid(); });
 el('btn-sort-dir').addEventListener('click', () => {
   sortAsc = !sortAsc;
   el('btn-sort-dir').textContent = sortAsc ? '↑' : '↓';
@@ -396,7 +442,6 @@ function renderSuggestions() {
   for (const s of pending) {
     const div = document.createElement('div');
     div.className = 'album-item';
-
     div.appendChild(makeThumbImg(s.id));
 
     const info = document.createElement('div');
@@ -453,8 +498,6 @@ el('btn-dismiss-suggestions').addEventListener('click', () => {
 // ── Build ──────────────────────────────────────────────────────────────────
 el('btn-build').addEventListener('click', async () => {
   if (!activeCardId) return;
-  const output = activeCard?.output_path;
-  if (!output) { alert('Set an output path in Settings before building.'); return; }
   try {
     await api('POST', `/api/cards/${activeCardId}/build`);
     startBuildSSE();
@@ -477,10 +520,47 @@ function startBuildSSE() {
       el('build-log').scrollTop = el('build-log').scrollHeight;
     }
     if (d.status === 'done' || d.status === 'error') {
-      buildSSE.close(); buildSSE = null; refreshCard();
+      buildSSE.close(); buildSSE = null; refreshCard(); loadCards();
     }
   };
   buildSSE.onerror = () => { if (buildSSE) { buildSSE.close(); buildSSE = null; } };
+}
+
+// ── Sync to card ───────────────────────────────────────────────────────────
+el('btn-sync').addEventListener('click', async () => {
+  if (!activeCardId) return;
+  if (!activeCard?.card_mount_path) {
+    alert('Set a card mount path in Settings before syncing.');
+    return;
+  }
+  if (!activeCard?.stage_exists) {
+    alert('Build the card first — no staged content found.');
+    return;
+  }
+  try {
+    await api('POST', `/api/cards/${activeCardId}/sync`);
+    startSyncSSE();
+  } catch (e) { showErr(e.message); }
+});
+
+function startSyncSSE() {
+  if (syncSSE) syncSSE.close();
+  el('sync-section').classList.remove('hidden');
+  el('sync-log').textContent = '';
+  syncSSE = new EventSource(`/api/cards/${activeCardId}/sync/stream`);
+  syncSSE.onmessage = e => {
+    const d = JSON.parse(e.data);
+    el('sync-bar').style.width = (d.pct || 0) + '%';
+    el('sync-pct').textContent = (d.pct || 0) + '%';
+    if (d.new_log?.length) {
+      el('sync-log').textContent += d.new_log.join('\n') + '\n';
+      el('sync-log').scrollTop = el('sync-log').scrollHeight;
+    }
+    if (d.status === 'done' || d.status === 'error') {
+      syncSSE.close(); syncSSE = null;
+    }
+  };
+  syncSSE.onerror = () => { if (syncSSE) { syncSSE.close(); syncSSE = null; } };
 }
 
 function fmtDur(s) {
@@ -492,7 +572,8 @@ el('btn-card-settings').addEventListener('click', () => {
   if (!activeCard) return;
   el('cfg-name').value    = activeCard.name;
   el('cfg-size').value    = activeCard.target_size_gb;
-  el('cfg-output').value  = activeCard.output_path || '';
+  el('cfg-output').value  = activeCard.card_mount_path || '';
+  el('cfg-stage').value   = activeCard.stage_path || '(NAS_STAGE_PATH not configured)';
   el('cfg-profile').value = activeCard.device_profile || 'generic';
   el('modal-card-settings').classList.remove('hidden');
 });
@@ -500,10 +581,10 @@ el('btn-card-settings').addEventListener('click', () => {
 el('btn-save-settings').addEventListener('click', async () => {
   try {
     await api('PATCH', `/api/cards/${activeCardId}`, {
-      name:           el('cfg-name').value.trim(),
-      target_size_gb: parseFloat(el('cfg-size').value),
-      output_path:    el('cfg-output').value.trim(),
-      device_profile: el('cfg-profile').value,
+      name:            el('cfg-name').value.trim(),
+      target_size_gb:  parseFloat(el('cfg-size').value),
+      card_mount_path: el('cfg-output').value.trim(),
+      device_profile:  el('cfg-profile').value,
     });
     el('modal-card-settings').classList.add('hidden');
     await loadCards();
@@ -524,27 +605,112 @@ el('btn-delete-card').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
-// ── New card modal ──────────────────────────────────────────────────────────
+// ── Export card definition ─────────────────────────────────────────────────
+el('btn-export-def').addEventListener('click', () => {
+  if (!activeCardId) return;
+  window.location.href = `/api/cards/${activeCardId}/export`;
+});
+
+// ── Import card definition modal ───────────────────────────────────────────
+el('btn-import-def').addEventListener('click', () => {
+  el('modal-card-settings').classList.add('hidden');
+  el('import-def-result').classList.add('hidden');
+  el('import-def-file').value = '';
+  el('modal-import-definition').classList.remove('hidden');
+});
+
+el('btn-do-import-def').addEventListener('click', async () => {
+  const file = el('import-def-file').files[0];
+  if (!file) { alert('Select a JSON file.'); return; }
+
+  const btn = el('btn-do-import-def');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+
+  try {
+    const data   = JSON.parse(await file.text());
+    const result = await api('POST', '/api/cards/import-definition', data);
+
+    const r = el('import-def-result');
+    r.classList.remove('hidden');
+    r.textContent = `✓ Created "${data.name}" with ${result.matched} album${result.matched !== 1 ? 's' : ''}.` +
+      (result.unmatched > 0 ? ` ${result.unmatched} not found in library.` : '');
+
+    await loadCards();
+    selectCard(result.id);
+    setTimeout(() => el('modal-import-definition').classList.add('hidden'), 2000);
+  } catch (e) { showErr(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
+});
+
+// ── New card modal ─────────────────────────────────────────────────────────
 el('btn-new-card').addEventListener('click', () => el('modal-new-card').classList.remove('hidden'));
 
 el('btn-create-card').addEventListener('click', async () => {
-  const name  = el('new-card-name').value.trim();
-  const size  = parseFloat(el('new-card-size').value);
+  const name = el('new-card-name').value.trim();
+  const size = parseFloat(el('new-card-size').value);
   if (!name || !size) { alert('Name and size are required.'); return; }
   try {
     const { id } = await api('POST', '/api/cards', {
       name,
-      target_size_gb: size,
-      output_path:    el('new-card-output').value.trim(),
-      device_profile: el('new-card-profile').value,
+      target_size_gb:  size,
+      card_mount_path: el('new-card-output').value.trim(),
+      device_profile:  el('new-card-profile').value,
     });
     el('modal-new-card').classList.add('hidden');
-    el('new-card-name').value = '';
-    el('new-card-size').value = '32';
+    el('new-card-name').value   = '';
+    el('new-card-size').value   = '32';
     el('new-card-output').value = '';
     await loadCards();
     selectCard(id);
   } catch (e) { showErr(e.message); }
+});
+
+// ── Import from physical card modal ────────────────────────────────────────
+el('btn-import-card').addEventListener('click', () => {
+  el('ic-result').classList.add('hidden');
+  el('modal-import-card').classList.remove('hidden');
+});
+
+el('btn-do-import-card').addEventListener('click', async () => {
+  const name  = el('ic-name').value.trim();
+  const size  = parseFloat(el('ic-size').value);
+  const mount = el('ic-mount').value.trim();
+  if (!name || !size || !mount) { alert('Name, size and mount path are required.'); return; }
+
+  const btn = el('btn-do-import-card');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+
+  try {
+    const { id } = await api('POST', '/api/cards', {
+      name,
+      target_size_gb:  size,
+      card_mount_path: mount,
+      device_profile:  el('ic-profile').value,
+    });
+
+    btn.textContent = 'Scanning card…';
+    const result = await api('POST', `/api/cards/${id}/import-card`);
+
+    const r = el('ic-result');
+    r.classList.remove('hidden');
+    r.textContent = `✓ Matched ${result.matched} album${result.matched !== 1 ? 's' : ''}.` +
+      (result.unmanaged > 0
+        ? ` ${result.unmanaged} unmanaged folder${result.unmanaged !== 1 ? 's' : ''} flagged (preserved on sync).`
+        : '');
+
+    await loadCards();
+    selectCard(id);
+    setTimeout(() => el('modal-import-card').classList.add('hidden'), 2500);
+  } catch (e) { showErr(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
 });
 
 // ── Modal close helpers ────────────────────────────────────────────────────
@@ -554,19 +720,6 @@ document.querySelectorAll('.modal-close').forEach(btn =>
 document.querySelectorAll('.modal').forEach(m =>
   m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); })
 );
-
-// ── Tile size slider ───────────────────────────────────────────────────────
-function initTileSlider() {
-  const slider = el('tile-size-slider');
-  const saved  = localStorage.getItem('tileSize');
-  if (saved) slider.value = saved;
-  const apply = () => {
-    document.documentElement.style.setProperty('--tile-size', slider.value + 'px');
-    localStorage.setItem('tileSize', slider.value);
-  };
-  apply();
-  slider.addEventListener('input', apply);
-}
 
 // ── Init ───────────────────────────────────────────────────────────────────
 initResizers();
