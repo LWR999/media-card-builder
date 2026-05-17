@@ -362,6 +362,7 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 .album-list {
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 .album-item {
   display: flex;
