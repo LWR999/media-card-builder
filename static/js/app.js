@@ -555,7 +555,21 @@ document.querySelectorAll('.modal').forEach(m =>
   m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); })
 );
 
+// ── Tile size slider ───────────────────────────────────────────────────────
+function initTileSlider() {
+  const slider = el('tile-size-slider');
+  const saved  = localStorage.getItem('tileSize');
+  if (saved) slider.value = saved;
+  const apply = () => {
+    document.documentElement.style.setProperty('--tile-size', slider.value + 'px');
+    localStorage.setItem('tileSize', slider.value);
+  };
+  apply();
+  slider.addEventListener('input', apply);
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 initResizers();
+initTileSlider();
 loadCards();
 doSearch();
