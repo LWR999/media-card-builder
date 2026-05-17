@@ -777,7 +777,11 @@ def import_from_card(card_id):
         return jsonify({"error": f"Mount path not found: {mount}"}), 400
 
     def _norm(s):
-        return unicodedata.normalize('NFC', s).strip().lower()
+        s = unicodedata.normalize('NFC', s).strip().lower()
+        s = s.replace('‘', "'").replace('’', "'")  # curly single quotes → straight
+        s = s.replace('“', '"').replace('”', '"')  # curly double quotes → straight
+        s = s.replace('–', '-').replace('—', '-')  # en/em dash → hyphen
+        return s
 
     with get_conn() as conn:
         with conn.cursor() as cur:
