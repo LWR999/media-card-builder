@@ -258,7 +258,7 @@ function buildCardAlbumRow(a) {
   actions.querySelector('.btn-remove').addEventListener('click', async () => {
     try {
       await api('DELETE', `/api/cards/${activeCardId}/albums/${a.album_id}`);
-      await refreshCard(); renderTileGrid(); renderSuggestions();
+      await refreshCard(); await doSearch(); renderSuggestions();
     } catch (e) { showErr(e.message); }
   });
   actions.querySelector('.btn-toggle').addEventListener('click', async () => {
