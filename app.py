@@ -1,4 +1,4 @@
-"""media-card-builder – Flask application."""
+"""media-card-builder - Flask application."""
 import json
 import logging
 import os
@@ -66,7 +66,7 @@ def _stage_path(card: dict) -> Path | None:
 def ensure_tables():
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Migrate output_path → card_mount_path if this is an older instance
+            # Migrate output_path -> card_mount_path if this is an older instance
             cur.execute("""
                 DO $$ BEGIN
                     ALTER TABLE cards RENAME COLUMN output_path TO card_mount_path;
@@ -213,7 +213,7 @@ def _enrich_albums(rows: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Routes – cards
+# Routes - cards
 # ---------------------------------------------------------------------------
 
 @app.get("/")
@@ -352,7 +352,7 @@ def update_card(card_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – album search
+# Routes - album search
 # ---------------------------------------------------------------------------
 
 @app.get("/api/albums/search")
@@ -419,7 +419,7 @@ def search_albums():
 
 
 # ---------------------------------------------------------------------------
-# Routes – card albums
+# Routes - card albums
 # ---------------------------------------------------------------------------
 
 @app.post("/api/cards/<int:card_id>/albums")
@@ -477,7 +477,7 @@ def patch_album(card_id, album_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – unmanaged paths
+# Routes - unmanaged paths
 # ---------------------------------------------------------------------------
 
 @app.delete("/api/cards/<int:card_id>/unmanaged/<int:path_id>")
@@ -495,7 +495,7 @@ def delete_unmanaged(card_id, path_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – suggestions
+# Routes - suggestions
 # ---------------------------------------------------------------------------
 
 @app.get("/api/cards/<int:card_id>/suggestions")
@@ -620,7 +620,7 @@ def accept_suggestions(card_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – build
+# Routes - build
 # ---------------------------------------------------------------------------
 
 @app.post("/api/cards/<int:card_id>/build")
@@ -695,7 +695,7 @@ def build_stream(card_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – sync
+# Routes - sync
 # ---------------------------------------------------------------------------
 
 @app.post("/api/cards/<int:card_id>/sync")
@@ -714,11 +714,11 @@ def start_sync_route(card_id):
             unmanaged = [r["folder_name"] for r in cur.fetchall()]
 
     if not card.get("card_mount_path"):
-        return jsonify({"error": "card_mount_path not set — add it in Settings"}), 400
+        return jsonify({"error": "card_mount_path not set - add it in Settings"}), 400
 
     stage = _stage_path(card)
     if not stage or not stage.exists():
-        return jsonify({"error": "Staging directory not found — build the card first"}), 400
+        return jsonify({"error": "Staging directory not found - build the card first"}), 400
 
     started = sync_job.start_sync(card_id, str(stage), card["card_mount_path"], unmanaged)
     if not started:
@@ -754,7 +754,7 @@ def sync_stream(card_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – import from physical card
+# Routes - import from physical card
 # ---------------------------------------------------------------------------
 
 @app.post("/api/cards/<int:card_id>/import-card")
@@ -777,37 +777,37 @@ def import_from_card(card_id):
         return jsonify({"error": f"Mount path not found: {mount}"}), 400
 
     def _norm(s):
-        s = unicodedata.normalize(‘NFC’, s).strip().lower()
-        s = s.replace(‘‘’, “’”).replace(‘’’, “’”)  # curly single quotes
-        s = s.replace(‘“’, ‘”’).replace(‘”’, ‘”’)  # curly double quotes
-        s = s.replace(‘–‘, ‘-’).replace(‘—‘, ‘-’)  # en/em dash
+        s = unicodedata.normalize('NFC', s).strip().lower()
+        s = s.replace('\u2018', "'").replace('\u2019', "'")
+        s = s.replace('\u201c', '"').replace('\u201d', '"')
+        s = s.replace('\u2013', '-').replace('\u2014', '-')
         return s
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(“SELECT id, nas_path FROM albums”)
+            cur.execute("SELECT id, nas_path FROM albums")
             album_by_folder = {_norm(Path(r[1]).name): r[0] for r in cur.fetchall()}
 
-            cur.execute(“””
+            cur.execute("""
                 SELECT a.id, ar.name, a.title
                 FROM albums a JOIN artists ar ON ar.id = a.artist_id
-            “””)
+            """)
             album_by_tags = {(_norm(r[1]), _norm(r[2])): r[0] for r in cur.fetchall()}
 
     def _match(folder):
-        “””Match a folder to a DB album: folder name first, FLAC tags as fallback.”””
+        """Match a folder to a DB album: folder name first, FLAC tags as fallback."""
         album_id = album_by_folder.get(_norm(folder.name))
         if album_id:
             return album_id
-        flacs = [f for f in folder.rglob(“*.flac”) if not f.name.startswith(“._”)][:3]
+        flacs = [f for f in folder.rglob("*.flac") if not f.name.startswith("._")][:3]
         for flac_path in flacs:
             try:
                 tags = FLAC(str(flac_path)).tags or {}
                 def _t(k):
                     v = tags.get(k.lower()) or tags.get(k.upper()) or []
-                    return v[0].strip() if v else ‘’
-                artist = _t(‘albumartist’) or _t(‘artist’)
-                album  = _t(‘album’)
+                    return v[0].strip() if v else ''
+                artist = _t('albumartist') or _t('artist')
+                album  = _t('album')
                 if artist and album:
                     aid = album_by_tags.get((_norm(artist), _norm(album)))
                     if aid:
@@ -820,23 +820,23 @@ def import_from_card(card_id):
     unmanaged   = []
 
     for item in sorted(mount_path.iterdir()):
-        if not item.is_dir() or item.name.startswith(“.”):
+        if not item.is_dir() or item.name.startswith("."):
             continue
         album_id = _match(item)
         if album_id:
             matched_ids.append(album_id)
             continue
-        # One level deeper — handle cards with format folders at root
+        # One level deeper - handle cards with format folders at root
         sub_matches = [
             _match(sub) for sub in sorted(item.iterdir())
-            if sub.is_dir() and not sub.name.startswith(“.”)
+            if sub.is_dir() and not sub.name.startswith(".")
         ]
         sub_matches = [x for x in sub_matches if x]
         if sub_matches:
             matched_ids.extend(sub_matches)
         else:
-            size = sum(f.stat().st_size for f in item.rglob(“*”) if f.is_file())
-            unmanaged.append({“folder_name”: item.name, “size_bytes”: size})
+            size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
+            unmanaged.append({"folder_name": item.name, "size_bytes": size})
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -862,7 +862,7 @@ def import_from_card(card_id):
 
 
 # ---------------------------------------------------------------------------
-# Routes – export / import card definition
+# Routes - export / import card definition
 # ---------------------------------------------------------------------------
 
 @app.get("/api/cards/<int:card_id>/export")
