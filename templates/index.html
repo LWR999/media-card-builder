@@ -91,49 +91,53 @@
           </div>
         </div>
 
-        <div id="card-albums" class="album-list"></div>
+        <div id="card-content-scroll">
 
-        <div id="unmanaged-section" class="hidden">
-          <div class="section-header">
-            Unmanaged folders
-            <span id="unmanaged-count" class="section-badge"></span>
-            <span class="section-hint">preserved on sync</span>
-          </div>
-          <div id="unmanaged-list" class="album-list"></div>
-        </div>
+          <div id="card-albums" class="album-list"></div>
 
-        <div id="suggestions-section" class="hidden">
-          <div class="section-header">
-            Suggestions
-            <button id="btn-accept-all"         class="btn-secondary small">Accept all</button>
-            <button id="btn-dismiss-suggestions" class="icon-btn small">✕</button>
-          </div>
-          <div id="suggestions-list" class="album-list"></div>
-        </div>
-
-        <div id="build-section" class="hidden">
-          <div class="section-header">Build Progress</div>
-          <div class="build-body">
-            <div class="progress-bar"><div id="build-bar" class="progress-fill"></div></div>
-            <div class="progress-info">
-              <span id="build-pct">0%</span>
-              <span id="build-eta"></span>
+          <div id="unmanaged-section" class="hidden">
+            <div class="section-header">
+              Unmanaged folders
+              <span id="unmanaged-count" class="section-badge"></span>
+              <span class="section-hint">preserved on sync</span>
             </div>
-            <div id="build-current" class="build-current"></div>
-            <pre id="build-log" class="build-log"></pre>
+            <div id="unmanaged-list" class="album-list"></div>
           </div>
-        </div>
 
-        <div id="sync-section" class="hidden">
-          <div class="section-header">Sync Progress</div>
-          <div class="build-body">
-            <div class="progress-bar"><div id="sync-bar" class="progress-fill sync-fill"></div></div>
-            <div class="progress-info">
-              <span id="sync-pct">0%</span>
+          <div id="suggestions-section" class="hidden">
+            <div class="section-header">
+              Suggestions
+              <button id="btn-accept-all"         class="btn-secondary small">Accept all</button>
+              <button id="btn-dismiss-suggestions" class="icon-btn small">✕</button>
             </div>
-            <pre id="sync-log" class="build-log"></pre>
+            <div id="suggestions-list" class="album-list"></div>
           </div>
-        </div>
+
+          <div id="build-section" class="hidden">
+            <div class="section-header">Build Progress</div>
+            <div class="build-body">
+              <div class="progress-bar"><div id="build-bar" class="progress-fill"></div></div>
+              <div class="progress-info">
+                <span id="build-pct">0%</span>
+                <span id="build-eta"></span>
+              </div>
+              <div id="build-current" class="build-current"></div>
+              <pre id="build-log" class="build-log"></pre>
+            </div>
+          </div>
+
+          <div id="sync-section" class="hidden">
+            <div class="section-header">Sync Progress</div>
+            <div class="build-body">
+              <div class="progress-bar"><div id="sync-bar" class="progress-fill sync-fill"></div></div>
+              <div class="progress-info">
+                <span id="sync-pct">0%</span>
+              </div>
+              <pre id="sync-log" class="build-log"></pre>
+            </div>
+          </div>
+
+        </div><!-- /card-content-scroll -->
 
       </div><!-- /card-workspace -->
     </div><!-- /current-card-pane -->

@@ -359,10 +359,14 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 }
 
 /* ── Card album list rows ── */
-.album-list {
-  overflow-y: auto;
+#card-content-scroll {
   flex: 1;
+  overflow-y: auto;
   min-height: 0;
+}
+
+.album-list {
+  /* layout handled by #card-content-scroll */
 }
 .album-item {
   display: flex;
