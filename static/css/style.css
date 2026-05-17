@@ -100,6 +100,13 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
   flex-shrink: 0;
 }
 
+.library-hint {
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .toolbar-filters {
   display: flex;
   gap: 5px;

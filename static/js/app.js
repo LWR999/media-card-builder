@@ -174,6 +174,7 @@ async function selectCard(id) {
   );
   el('no-card').classList.add('hidden');
   el('card-workspace').classList.remove('hidden');
+  el('library-hint').classList.remove('hidden');
   await refreshCard();
   await doSearch();
 }

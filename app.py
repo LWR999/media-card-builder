@@ -777,29 +777,66 @@ def import_from_card(card_id):
         return jsonify({"error": f"Mount path not found: {mount}"}), 400
 
     def _norm(s):
-        s = unicodedata.normalize('NFC', s).strip().lower()
-        s = s.replace('‘', "'").replace('’', "'")  # curly single quotes → straight
-        s = s.replace('“', '"').replace('”', '"')  # curly double quotes → straight
-        s = s.replace('–', '-').replace('—', '-')  # en/em dash → hyphen
+        s = unicodedata.normalize(‘NFC’, s).strip().lower()
+        s = s.replace(‘‘’, “’”).replace(‘’’, “’”)  # curly single quotes
+        s = s.replace(‘“’, ‘”’).replace(‘”’, ‘”’)  # curly double quotes
+        s = s.replace(‘–‘, ‘-’).replace(‘—‘, ‘-’)  # en/em dash
         return s
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, nas_path FROM albums")
+            cur.execute(“SELECT id, nas_path FROM albums”)
             album_by_folder = {_norm(Path(r[1]).name): r[0] for r in cur.fetchall()}
+
+            cur.execute(“””
+                SELECT a.id, ar.name, a.title
+                FROM albums a JOIN artists ar ON ar.id = a.artist_id
+            “””)
+            album_by_tags = {(_norm(r[1]), _norm(r[2])): r[0] for r in cur.fetchall()}
+
+    def _match(folder):
+        “””Match a folder to a DB album: folder name first, FLAC tags as fallback.”””
+        album_id = album_by_folder.get(_norm(folder.name))
+        if album_id:
+            return album_id
+        flacs = [f for f in folder.rglob(“*.flac”) if not f.name.startswith(“._”)][:3]
+        for flac_path in flacs:
+            try:
+                tags = FLAC(str(flac_path)).tags or {}
+                def _t(k):
+                    v = tags.get(k.lower()) or tags.get(k.upper()) or []
+                    return v[0].strip() if v else ‘’
+                artist = _t(‘albumartist’) or _t(‘artist’)
+                album  = _t(‘album’)
+                if artist and album:
+                    aid = album_by_tags.get((_norm(artist), _norm(album)))
+                    if aid:
+                        return aid
+            except Exception:
+                pass
+        return None
 
     matched_ids = []
     unmanaged   = []
 
     for item in sorted(mount_path.iterdir()):
-        if not item.is_dir() or item.name.startswith("."):
+        if not item.is_dir() or item.name.startswith(“.”):
             continue
-        album_id = album_by_folder.get(_norm(item.name))
+        album_id = _match(item)
         if album_id:
             matched_ids.append(album_id)
+            continue
+        # One level deeper — handle cards with format folders at root
+        sub_matches = [
+            _match(sub) for sub in sorted(item.iterdir())
+            if sub.is_dir() and not sub.name.startswith(“.”)
+        ]
+        sub_matches = [x for x in sub_matches if x]
+        if sub_matches:
+            matched_ids.extend(sub_matches)
         else:
-            size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
-            unmanaged.append({"folder_name": item.name, "size_bytes": size})
+            size = sum(f.stat().st_size for f in item.rglob(“*”) if f.is_file())
+            unmanaged.append({“folder_name”: item.name, “size_bytes”: size})
 
     with get_conn() as conn:
         with conn.cursor() as cur:
