@@ -69,7 +69,7 @@ def ensure_tables():
             cur.execute("""
                 DO $$ BEGIN
                     ALTER TABLE cards RENAME COLUMN output_path TO card_mount_path;
-                EXCEPTION WHEN undefined_column THEN NULL;
+                EXCEPTION WHEN undefined_column OR undefined_table THEN NULL;
                 END $$;
             """)
 
