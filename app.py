@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 
@@ -775,10 +776,13 @@ def import_from_card(card_id):
     if not mount_path.exists():
         return jsonify({"error": f"Mount path not found: {mount}"}), 400
 
+    def _norm(s):
+        return unicodedata.normalize('NFC', s).strip().lower()
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id, nas_path FROM albums")
-            album_by_folder = {Path(r[1]).name: r[0] for r in cur.fetchall()}
+            album_by_folder = {_norm(Path(r[1]).name): r[0] for r in cur.fetchall()}
 
     matched_ids = []
     unmanaged   = []
@@ -786,7 +790,7 @@ def import_from_card(card_id):
     for item in sorted(mount_path.iterdir()):
         if not item.is_dir() or item.name.startswith("."):
             continue
-        album_id = album_by_folder.get(item.name)
+        album_id = album_by_folder.get(_norm(item.name))
         if album_id:
             matched_ids.append(album_id)
         else:

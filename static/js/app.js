@@ -175,7 +175,7 @@ async function selectCard(id) {
   el('no-card').classList.add('hidden');
   el('card-workspace').classList.remove('hidden');
   await refreshCard();
-  renderTileGrid();
+  await doSearch();
 }
 
 async function refreshCard() {
@@ -359,21 +359,23 @@ function renderTileGrid() {
       chk.className = 'tile-check';
       chk.textContent = '✓';
       tile.appendChild(chk);
+      tile.addEventListener('click', async () => {
+        if (!activeCardId) return;
+        try {
+          await api('DELETE', `/api/cards/${activeCardId}/albums/${r.id}`);
+          await refreshCard();
+          await doSearch();
+        } catch (e) { showErr(e.message); }
+      });
     } else {
-      const handler = async () => {
+      tile.addEventListener('click', async () => {
         if (!activeCardId) { alert('Select a card first.'); return; }
         try {
           await api('POST', `/api/cards/${activeCardId}/albums`, { album_id: r.id });
-          tile.classList.add('on-card');
-          tile.removeEventListener('click', handler);
-          const chk = document.createElement('div');
-          chk.className = 'tile-check';
-          chk.textContent = '✓';
-          tile.appendChild(chk);
           await refreshCard();
+          await doSearch();
         } catch (e) { showErr(e.message); }
-      };
-      tile.addEventListener('click', handler);
+      });
     }
 
     grid.appendChild(tile);
