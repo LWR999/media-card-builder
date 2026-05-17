@@ -228,11 +228,11 @@ function renderCardAlbums() {
 
 function buildCardAlbumRow(a) {
   const div = document.createElement('div');
-  div.className = 'album-item';
+  div.className = 'album-item' + (a.added_by === 'suggestion' ? ' is-suggestion' : '');
   if (!a.accepted) div.style.opacity = '0.45';
 
   const badge = a.added_by === 'suggestion'
-    ? '<span class="badge-suggestion">suggest</span>' : '';
+    ? '<span class="badge-suggestion">Suggested</span>' : '';
 
   div.appendChild(makeThumbImg(a.album_id));
 
