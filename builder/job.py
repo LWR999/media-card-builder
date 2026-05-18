@@ -32,7 +32,7 @@ def _update_job(card_id: int, **kwargs):
 
 
 def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-                personal_root: str = "", device_profile: str = "generic") -> bool:
+                personal_root: str = "") -> bool:
     with _lock:
         if card_id in _jobs and _jobs[card_id].get("status") == "running":
             return False
@@ -48,14 +48,14 @@ def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
     threading.Thread(
         target=_run_build,
-        args=(card_id, db_params, nas_root, stage_path, personal_root, device_profile),
+        args=(card_id, db_params, nas_root, stage_path, personal_root),
         daemon=True,
     ).start()
     return True
 
 
 def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-               personal_root: str = "", device_profile: str = "generic"):
+               personal_root: str = ""):
     conn = None
     try:
         conn = psycopg2.connect(**db_params)
@@ -87,10 +87,6 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
         _update_job(card_id, total=total)
 
-        resize_artwork = (device_profile == "bentley")
-        if not resize_artwork:
-            _append_log(card_id, f"Profile '{device_profile}': skipping artwork resize (bentley only)")
-
         nas_root_path = Path(nas_root.rstrip("/"))
         output_root   = Path(stage_path)
         output_root.mkdir(parents=True, exist_ok=True)
@@ -113,8 +109,7 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
             try:
                 _copy_album(src_dir, dest_dir)
-                process_album_directory(dest_dir, log=lambda m: _append_log(card_id, m),
-                                        resize_artwork=resize_artwork)
+                process_album_directory(dest_dir, log=lambda m: _append_log(card_id, m))
             except Exception as e:
                 _append_log(card_id, f"  ERROR: {e}")
                 _jobs[card_id]["errors"].append(f"{artist} - {title}: {e}")

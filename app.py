@@ -782,8 +782,7 @@ def start_build_route(card_id):
     if not stage:
         return jsonify({"error": "NAS_STAGE_PATH not configured in .env"}), 500
 
-    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL,
-                                     device_profile=card.get("device_profile", "generic"))
+    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL)
     if not started:
         return jsonify({"error": "already running"}), 409
     return jsonify({"ok": True, "stage_path": str(stage)})
