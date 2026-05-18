@@ -656,10 +656,10 @@ def get_suggestions(card_id):
                                   COALESCE(t.sample_rate, 44100) *
                                   COALESCE(t.bit_depth, 16) *
                                   COALESCE(t.channels, 2)) / 8.0 * 0.60
-                        )::BIGINT, 0)
+                        )::BIGINT, 0) AS used_bytes
                     FROM tracks t WHERE t.album_id = ANY(%s)
                 """, (list(seed_ids),))
-                used_bytes = cur.fetchone()[0] or 0
+                used_bytes = (cur.fetchone() or {}).get("used_bytes") or 0
             else:
                 used_bytes = 0
 
