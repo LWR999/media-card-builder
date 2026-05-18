@@ -145,11 +145,11 @@ def _extract_art(album_id: int) -> bytes | None:
     album_dir = Path(NAS_ROOT) / row[0]
     if not album_dir.exists():
         return None
-    flacs = sorted(album_dir.glob("*.flac"))
+    flacs = [f for f in sorted(album_dir.glob("*.flac")) if not f.name.startswith("._")]
     if not flacs:
         for sub in sorted(album_dir.iterdir()):
             if sub.is_dir() and not sub.name.startswith("."):
-                flacs = sorted(sub.glob("*.flac"))
+                flacs = [f for f in sorted(sub.glob("*.flac")) if not f.name.startswith("._")]
                 if flacs:
                     break
     for flac_path in flacs[:5]:
