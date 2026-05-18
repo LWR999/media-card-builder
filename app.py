@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import random
 import re
 import time
 import unicodedata
@@ -27,6 +28,10 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 NAS_ROOT     = os.environ.get("NAS_MUSIC_PATH",    "").rstrip("/")
 NAS_STAGE    = os.environ.get("NAS_STAGE_PATH",   "").rstrip("/")
 NAS_PERSONAL = os.environ.get("NAS_PERSONAL_PATH","").rstrip("/")
+
+# Cards are sold in base-10 GB (10^9 bytes); ExFAT also uses space for
+# metadata. 92% of nominal GB gives safe usable capacity.
+CARD_USABLE_FACTOR = 0.92
 
 DB_PARAMS = {
     "host":     os.environ.get("DB_HOST", "localhost"),
@@ -71,6 +76,11 @@ def _stage_status(card: dict, sp: Path | None) -> str:
     if last_mod and last_mod > last_built:
         return "stale"
     return "fresh"
+
+
+def _card_target_bytes(target_size_gb: float) -> int:
+    """Usable bytes on a card of the given nominal GB size."""
+    return int(target_size_gb * 1_000_000_000 * CARD_USABLE_FACTOR)
 
 
 def _touch_card(cur, card_id: int):
@@ -363,7 +373,7 @@ def get_card(card_id):
     result["unmanaged_bytes"]  = unmanaged_bytes
     result["personal_bytes"]   = personal_bytes
     result["used_bytes"]       = album_bytes + unmanaged_bytes + personal_bytes
-    result["target_bytes"]     = int(float(card["target_size_gb"]) * 1024 ** 3)
+    result["target_bytes"]     = _card_target_bytes(float(card["target_size_gb"]))
     result["stage_path"]       = str(sp) if sp else None
     result["stage_status"]    = _stage_status(card, sp)
     return jsonify(result)
@@ -611,7 +621,7 @@ def get_suggestions(card_id):
             if not card:
                 return jsonify({"error": "not found"}), 404
 
-            target_bytes = int(float(card["target_size_gb"]) * 1024 ** 3)
+            target_bytes = _card_target_bytes(float(card["target_size_gb"]))
 
             cur.execute("""
                 SELECT al.id, al.artist_id, al.year AS release_year, al.nas_path,
@@ -635,10 +645,9 @@ def get_suggestions(card_id):
             else:
                 seed_genre_ids = set()
 
-            used_bytes = sum(_album_size_bytes(r["nas_path"]) for r in seed_rows)
-            remaining  = target_bytes - used_bytes
-            buffer     = int(target_bytes * 0.02)
-            fill_target = remaining - buffer
+            used_bytes  = sum(_album_size_bytes(r["nas_path"]) for r in seed_rows)
+            remaining   = target_bytes - used_bytes
+            fill_target = remaining
 
             if fill_target <= 0:
                 return jsonify({"suggestions": [], "remaining_bytes": remaining})
@@ -672,11 +681,15 @@ def get_suggestions(card_id):
                 s += 20
         return s
 
-    scored = sorted(candidates, key=lambda r: (-score(r), r["artist"], r["title"]))
+    # Shuffle before sorting so ties are broken randomly, not alphabetically.
+    # Seed with card_id for stable suggestions per card.
+    shuffled = list(candidates)
+    random.Random(card_id).shuffle(shuffled)
+    scored = sorted(shuffled, key=lambda r: -score(r))
 
     suggestions = []
     space_left  = fill_target
-    for row in scored[:800]:
+    for row in scored:
         if space_left <= 0:
             break
         sz = _album_size_bytes(row["nas_path"])
