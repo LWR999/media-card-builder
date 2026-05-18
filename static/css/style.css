@@ -428,6 +428,21 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
   font-weight: 600;
   letter-spacing: .2px;
 }
+.badge-personal {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--success);
+  color: #fff;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+.album-item.is-personal {
+  border-left: 3px solid var(--success);
+  padding-left: 5px;
+}
 
 /* ── Build progress ── */
 .build-body { padding: 8px 12px; }
@@ -611,6 +626,42 @@ input:focus, select:focus { border-color: var(--accent); }
 
 /* ── Sync progress bar colour ── */
 .sync-fill { background: var(--accent2); }
+
+/* ── Personal content picker modal ── */
+.personal-picker-box { width: 460px; }
+.personal-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+}
+.personal-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+}
+.personal-picker-item:not(.already-added):hover { background: var(--surface2); }
+.personal-picker-item.already-added { opacity: 0.5; }
+.personal-picker-name {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.personal-picker-size {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 /* ── Modal extras ── */
 .modal-hint {

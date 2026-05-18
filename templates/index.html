@@ -97,6 +97,16 @@
 
           <div id="card-albums" class="album-list"></div>
 
+          <div id="personal-section">
+            <div class="section-header">
+              Personal Content
+              <span id="personal-count" class="section-badge"></span>
+              <button id="btn-add-personal" class="btn-secondary small">Add</button>
+              <span class="section-hint">copied as-is on build</span>
+            </div>
+            <div id="personal-list" class="album-list"></div>
+          </div>
+
           <div id="unmanaged-section" class="hidden">
             <div class="section-header">
               Unmanaged folders
@@ -231,6 +241,18 @@
       <button id="btn-export-def"    class="btn-secondary">Export definition</button>
       <button id="btn-import-def"    class="btn-secondary">Import definition</button>
       <button class="btn-secondary modal-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: personal content picker ── -->
+<div id="modal-personal-picker" class="modal hidden">
+  <div class="modal-box personal-picker-box">
+    <h2>Add Personal Content</h2>
+    <p class="modal-hint">Select folders from your personal content store to include on this card.</p>
+    <div id="personal-picker-list" class="personal-picker-list"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary modal-close">Close</button>
     </div>
   </div>
 </div>

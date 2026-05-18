@@ -187,6 +187,7 @@ async function refreshCard() {
   renderCardHeader();
   renderSpaceBar();
   renderCardAlbums();
+  renderPersonal();
   renderUnmanaged();
 }
 
@@ -198,6 +199,11 @@ function renderCardHeader() {
   const stageInfo = c.stage_exists ? ' · staged ✓' : '';
   el('card-stats-inline').textContent =
     `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB${stageInfo}`;
+
+  const hasStaging = !!c.stage_exists;
+  el('btn-build').textContent    = hasStaging ? 'Rebuild' : 'Build';
+  el('btn-sync').disabled        = !hasStaging;
+  el('btn-sync').title           = hasStaging ? '' : 'Build first to create staging';
 }
 
 // ── Space bar ──────────────────────────────────────────────────────────────
@@ -314,6 +320,101 @@ function renderUnmanaged() {
     list.appendChild(div);
   }
 }
+
+// ── Personal content ───────────────────────────────────────────────────────
+function renderPersonal() {
+  const items = activeCard?.personal_items || [];
+  el('personal-count').textContent = items.length || '';
+  const list = el('personal-list');
+  list.innerHTML = '';
+
+  if (!items.length) {
+    list.innerHTML = '<div class="album-item" style="color:var(--muted);font-size:12px;padding:10px 12px">No personal content added yet.</div>';
+    return;
+  }
+
+  for (const p of items) {
+    const div = document.createElement('div');
+    div.className = 'album-item is-personal';
+
+    const info = document.createElement('div');
+    info.className = 'album-info';
+    info.innerHTML = `<div class="album-title">${esc(p.display_name)}<span class="badge-personal">Personal</span></div>
+      <div class="album-sub">${p.folder_name !== p.display_name ? esc(p.folder_name) : ''}</div>`;
+    div.appendChild(info);
+
+    const size = document.createElement('span');
+    size.className = 'album-size';
+    size.textContent = fmt(p.size_bytes);
+    div.appendChild(size);
+
+    const actions = document.createElement('div');
+    actions.className = 'album-row-actions';
+    actions.innerHTML = `<button class="icon-btn small btn-remove" title="Remove">✕</button>`;
+    div.appendChild(actions);
+
+    actions.querySelector('.btn-remove').addEventListener('click', async () => {
+      try {
+        await api('DELETE', `/api/cards/${activeCardId}/personal/${p.id}`);
+        await refreshCard();
+      } catch (e) { showErr(e.message); }
+    });
+
+    list.appendChild(div);
+  }
+}
+
+el('btn-add-personal').addEventListener('click', async () => {
+  if (!activeCardId) return;
+  const list = el('personal-picker-list');
+  list.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:12px">Loading…</div>';
+  el('modal-personal-picker').classList.remove('hidden');
+
+  try {
+    const items  = await api('GET', '/api/personal');
+    const onCard = new Set((activeCard?.personal_items || []).map(p => p.folder_name));
+    list.innerHTML = '';
+
+    if (!items.length) {
+      list.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:12px">No folders found in personal content store. Check NAS_PERSONAL_PATH in .env.</div>';
+      return;
+    }
+
+    for (const item of items) {
+      const added = onCard.has(item.folder_name);
+      const div = document.createElement('div');
+      div.className = 'personal-picker-item' + (added ? ' already-added' : '');
+      div.innerHTML = `<span class="personal-picker-name">${esc(item.display_name)}</span>
+        <span class="personal-picker-size">${fmt(item.size_bytes)}</span>
+        <button class="btn-secondary small"${added ? ' disabled' : ''}>${added ? 'Added' : 'Add'}</button>`;
+
+      if (!added) {
+        div.querySelector('button').addEventListener('click', async e => {
+          e.target.disabled = true;
+          e.target.textContent = 'Adding…';
+          try {
+            await api('POST', `/api/cards/${activeCardId}/personal`, {
+              folder_name:  item.folder_name,
+              display_name: item.display_name,
+            });
+            await refreshCard();
+            e.target.textContent = 'Added';
+            div.classList.add('already-added');
+            onCard.add(item.folder_name);
+          } catch (err) {
+            e.target.disabled = false;
+            e.target.textContent = 'Add';
+            showErr(err.message);
+          }
+        });
+      }
+
+      list.appendChild(div);
+    }
+  } catch (e) {
+    list.innerHTML = `<div style="padding:14px;color:var(--danger);font-size:12px">Error: ${esc(e.message)}</div>`;
+  }
+});
 
 // ── Tile grid ──────────────────────────────────────────────────────────────
 function sortedResults() {

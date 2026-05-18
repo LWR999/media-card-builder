@@ -24,8 +24,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 
-NAS_ROOT  = os.environ.get("NAS_MUSIC_PATH", "").rstrip("/")
-NAS_STAGE = os.environ.get("NAS_STAGE_PATH", "").rstrip("/")
+NAS_ROOT     = os.environ.get("NAS_MUSIC_PATH",    "").rstrip("/")
+NAS_STAGE    = os.environ.get("NAS_STAGE_PATH",   "").rstrip("/")
+NAS_PERSONAL = os.environ.get("NAS_PERSONAL_PATH","").rstrip("/")
 
 DB_PARAMS = {
     "host":     os.environ.get("DB_HOST", "localhost"),
@@ -102,6 +103,16 @@ def ensure_tables():
                     card_id     INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
                     folder_name VARCHAR(2000) NOT NULL,
                     size_bytes  BIGINT NOT NULL DEFAULT 0,
+                    UNIQUE (card_id, folder_name)
+                );
+
+                CREATE TABLE IF NOT EXISTS card_personal_items (
+                    id           SERIAL PRIMARY KEY,
+                    card_id      INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+                    folder_name  VARCHAR(500) NOT NULL,
+                    display_name VARCHAR(500) NOT NULL,
+                    size_bytes   BIGINT NOT NULL DEFAULT 0,
+                    added_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (card_id, folder_name)
                 );
             """)
@@ -311,16 +322,26 @@ def get_card(card_id):
             """, (card_id,))
             unmanaged = [dict(r) for r in cur.fetchall()]
 
+            cur.execute("""
+                SELECT id, folder_name, display_name, size_bytes
+                FROM card_personal_items WHERE card_id = %s
+                ORDER BY display_name
+            """, (card_id,))
+            personal = [dict(r) for r in cur.fetchall()]
+
     sp = _stage_path(card)
     album_bytes    = sum(a["size_bytes"] for a in albums if a["accepted"])
     unmanaged_bytes = sum(u["size_bytes"] for u in unmanaged)
+    personal_bytes  = sum(p["size_bytes"] for p in personal)
 
     result = card
     result["albums"]           = albums
     result["unmanaged_paths"]  = unmanaged
+    result["personal_items"]   = personal
     result["album_bytes"]      = album_bytes
     result["unmanaged_bytes"]  = unmanaged_bytes
-    result["used_bytes"]       = album_bytes + unmanaged_bytes
+    result["personal_bytes"]   = personal_bytes
+    result["used_bytes"]       = album_bytes + unmanaged_bytes + personal_bytes
     result["target_bytes"]     = int(float(card["target_size_gb"]) * 1024 ** 3)
     result["stage_path"]       = str(sp) if sp else None
     result["stage_exists"]     = sp.exists() if sp else False
@@ -495,6 +516,63 @@ def delete_unmanaged(card_id, path_id):
 
 
 # ---------------------------------------------------------------------------
+# Routes - personal content
+# ---------------------------------------------------------------------------
+
+@app.get("/api/personal")
+def list_personal():
+    if not NAS_PERSONAL:
+        return jsonify({"error": "NAS_PERSONAL_PATH not configured in .env"}), 500
+    root = Path(NAS_PERSONAL)
+    if not root.exists():
+        return jsonify({"error": f"Personal path not found: {NAS_PERSONAL}"}), 500
+    items = []
+    for p in sorted(root.iterdir()):
+        if not p.is_dir() or p.name.startswith("."):
+            continue
+        size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        items.append({"folder_name": p.name, "display_name": p.name, "size_bytes": size})
+    return jsonify(items)
+
+
+@app.post("/api/cards/<int:card_id>/personal")
+def add_personal(card_id):
+    data = request.json or {}
+    folder_name  = (data.get("folder_name") or "").strip()
+    display_name = (data.get("display_name") or folder_name).strip()
+    if not folder_name:
+        return jsonify({"error": "folder_name required"}), 400
+    size_bytes = 0
+    if NAS_PERSONAL:
+        src = Path(NAS_PERSONAL) / folder_name
+        if src.exists():
+            size_bytes = sum(f.stat().st_size for f in src.rglob("*") if f.is_file())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO card_personal_items (card_id, folder_name, display_name, size_bytes)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (card_id, folder_name) DO NOTHING
+            """, (card_id, folder_name, display_name, size_bytes))
+        conn.commit()
+    return jsonify({"ok": True}), 201
+
+
+@app.delete("/api/cards/<int:card_id>/personal/<int:item_id>")
+def remove_personal(card_id, item_id):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM card_personal_items WHERE id = %s AND card_id = %s RETURNING id",
+                (item_id, card_id),
+            )
+            if not cur.fetchone():
+                return jsonify({"error": "not found"}), 404
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # Routes - suggestions
 # ---------------------------------------------------------------------------
 
@@ -637,7 +715,7 @@ def start_build_route(card_id):
     if not stage:
         return jsonify({"error": "NAS_STAGE_PATH not configured in .env"}), 500
 
-    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage))
+    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL)
     if not started:
         return jsonify({"error": "already running"}), 409
     return jsonify({"ok": True, "stage_path": str(stage)})
