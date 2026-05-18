@@ -60,6 +60,24 @@ def _stage_path(card: dict) -> Path | None:
     return Path(NAS_STAGE) / folder
 
 
+def _stage_status(card: dict, sp: Path | None) -> str:
+    """Return 'none', 'stale', or 'fresh' for display in the UI."""
+    if not sp or not sp.exists():
+        return "none"
+    last_built = card.get("last_built_at")
+    if not last_built:
+        return "none"
+    last_mod = card.get("last_modified_at")
+    if last_mod and last_mod > last_built:
+        return "stale"
+    return "fresh"
+
+
+def _touch_card(cur, card_id: int):
+    """Stamp last_modified_at whenever card contents change."""
+    cur.execute("UPDATE cards SET last_modified_at = NOW() WHERE id = %s", (card_id,))
+
+
 # ---------------------------------------------------------------------------
 # Schema bootstrap
 # ---------------------------------------------------------------------------
@@ -117,6 +135,8 @@ def ensure_tables():
                 );
             """)
             cur.execute("ALTER TABLE cards ALTER COLUMN status SET DEFAULT 'draft'")
+            cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_built_at    TIMESTAMPTZ")
+            cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_modified_at TIMESTAMPTZ")
         conn.commit()
 
 
@@ -239,6 +259,7 @@ def list_cards():
             cur.execute("""
                 SELECT c.id, c.name, c.target_size_gb, c.card_mount_path,
                        c.device_profile, c.status, c.created_at,
+                       c.last_built_at, c.last_modified_at,
                        COUNT(ca.album_id) FILTER (WHERE ca.accepted) AS album_count
                 FROM cards c
                 LEFT JOIN card_albums ca ON ca.card_id = c.id
@@ -249,7 +270,7 @@ def list_cards():
     for c in cards:
         sp = _stage_path(c)
         c["stage_path"]   = str(sp) if sp else None
-        c["stage_exists"] = sp.exists() if sp else False
+        c["stage_status"] = _stage_status(c, sp)
     return jsonify(cards)
 
 
@@ -344,7 +365,7 @@ def get_card(card_id):
     result["used_bytes"]       = album_bytes + unmanaged_bytes + personal_bytes
     result["target_bytes"]     = int(float(card["target_size_gb"]) * 1024 ** 3)
     result["stage_path"]       = str(sp) if sp else None
-    result["stage_exists"]     = sp.exists() if sp else False
+    result["stage_status"]    = _stage_status(card, sp)
     return jsonify(result)
 
 
@@ -461,6 +482,7 @@ def add_album(card_id):
                 VALUES (%s, %s, %s, true)
                 ON CONFLICT (card_id, album_id) DO NOTHING
             """, (card_id, album_id, added_by))
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True}), 201
 
@@ -475,6 +497,7 @@ def remove_album(card_id, album_id):
             )
             if not cur.fetchone():
                 return jsonify({"error": "not found"}), 404
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True})
 
@@ -493,6 +516,7 @@ def patch_album(card_id, album_id):
             )
             if not cur.fetchone():
                 return jsonify({"error": "not found"}), 404
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True})
 
@@ -554,6 +578,7 @@ def add_personal(card_id):
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (card_id, folder_name) DO NOTHING
             """, (card_id, folder_name, display_name, size_bytes))
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True}), 201
 
@@ -568,6 +593,7 @@ def remove_personal(card_id, item_id):
             )
             if not cur.fetchone():
                 return jsonify({"error": "not found"}), 404
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True})
 
@@ -693,6 +719,7 @@ def accept_suggestions(card_id):
                     VALUES (%s, %s, 'suggestion', true)
                     ON CONFLICT (card_id, album_id) DO UPDATE SET accepted = true
                 """, (card_id, aid))
+            _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True})
 

@@ -624,6 +624,21 @@ input:focus, select:focus { border-color: var(--accent); }
   margin-left: auto;
 }
 
+/* ── Stage status pill ── */
+.stage-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  vertical-align: middle;
+  margin-left: 6px;
+  letter-spacing: 0.02em;
+}
+.stage-none  { background: var(--surface2); color: var(--muted); }
+.stage-stale { background: #4a3200; color: #ffc857; }
+.stage-fresh { background: #1a3d28; color: #6ddb8a; }
+
 /* ── Sync progress bar colour ── */
 .sync-fill { background: var(--accent2); }
 

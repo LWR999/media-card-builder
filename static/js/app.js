@@ -157,9 +157,9 @@ async function loadCards() {
   for (const c of cards) {
     const li = document.createElement('li');
     li.dataset.id = c.id;
-    const staged = c.stage_exists ? ' · staged' : '';
-    li.innerHTML = `<div>${esc(c.name)}</div>
-      <div class="card-meta">${c.target_size_gb} GB · ${c.album_count} albums${staged}</div>`;
+    const pill = stagePill(c.stage_status);
+    li.innerHTML = `<div>${esc(c.name)}${pill}</div>
+      <div class="card-meta">${c.target_size_gb} GB · ${c.album_count} albums</div>`;
     if (c.id === activeCardId) li.classList.add('active');
     li.addEventListener('click', () => selectCard(c.id));
     ul.appendChild(li);
@@ -191,19 +191,26 @@ async function refreshCard() {
   renderUnmanaged();
 }
 
+// ── Stage status pill ──────────────────────────────────────────────────────
+function stagePill(status) {
+  const labels = { none: 'not built', stale: 'rebuild needed', fresh: 'ready to sync' };
+  return `<span class="stage-pill stage-${status||'none'}">${labels[status]||'not built'}</span>`;
+}
+
 // ── Card header ────────────────────────────────────────────────────────────
 function renderCardHeader() {
   const c = activeCard;
-  el('card-name-display').textContent = c.name;
-  const accepted  = c.albums.filter(a => a.accepted);
-  const stageInfo = c.stage_exists ? ' · staged ✓' : '';
+  el('card-name-display').innerHTML = esc(c.name) + stagePill(c.stage_status);
+  const accepted = c.albums.filter(a => a.accepted);
   el('card-stats-inline').textContent =
-    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB${stageInfo}`;
+    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB`;
 
-  const hasStaging = !!c.stage_exists;
-  el('btn-build').textContent    = hasStaging ? 'Rebuild' : 'Build';
-  el('btn-sync').disabled        = !hasStaging;
-  el('btn-sync').title           = hasStaging ? '' : 'Build first to create staging';
+  const status = c.stage_status || 'none';
+  el('btn-build').textContent = status === 'none' ? 'Build' : 'Rebuild';
+  el('btn-sync').disabled     = status === 'none';
+  el('btn-sync').title        = status === 'none' ? 'Build first to create staging'
+                              : status === 'stale' ? 'Staging is out of date — consider rebuilding first'
+                              : '';
 }
 
 // ── Space bar ──────────────────────────────────────────────────────────────
@@ -644,9 +651,13 @@ el('btn-sync').addEventListener('click', async () => {
     alert('Set a card mount path in Settings before syncing.');
     return;
   }
-  if (!activeCard?.stage_exists) {
+  const status = activeCard?.stage_status || 'none';
+  if (status === 'none') {
     alert('Build the card first — no staged content found.');
     return;
+  }
+  if (status === 'stale') {
+    if (!confirm('Staging is out of date — card contents have changed since the last build.\n\nSync anyway with the old staging?')) return;
   }
   try {
     await api('POST', `/api/cards/${activeCardId}/sync`);

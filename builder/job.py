@@ -135,7 +135,7 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
                 _append_log(card_id, f"  ERROR: {e}")
                 _jobs[card_id]["errors"].append(f"[Personal] {display_name}: {e}")
 
-        cur.execute("UPDATE cards SET status = 'built' WHERE id = %s", (card_id,))
+        cur.execute("UPDATE cards SET status = 'built', last_built_at = NOW() WHERE id = %s", (card_id,))
         conn.commit()
         _update_job(card_id, status="done", done=total)
         _append_log(card_id, "Build complete.")
