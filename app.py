@@ -233,23 +233,27 @@ def album_art(album_id):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _album_size_bytes(nas_path: str) -> int:
-    """Sum FLAC file sizes on disk; 0 if unavailable."""
-    if not NAS_ROOT or not nas_path:
-        return 0
-    album_dir = Path(NAS_ROOT) / nas_path
-    if not album_dir.exists():
-        return 0
-    return sum(
-        f.stat().st_size
-        for f in album_dir.rglob("*.flac")
-        if f.is_file()
-    )
-
 
 def _enrich_albums(rows: list[dict]) -> list[dict]:
+    """Attach estimated size_bytes to each album row using a single DB query."""
+    if not rows:
+        return rows
+    album_ids = [r["album_id"] for r in rows]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT album_id,
+                       ROUND(SUM(duration_secs *
+                                 COALESCE(sample_rate, 44100) *
+                                 COALESCE(bit_depth, 16) *
+                                 COALESCE(channels, 2)) / 8.0 * 0.60)::BIGINT AS size_bytes
+                FROM tracks
+                WHERE album_id = ANY(%s)
+                GROUP BY album_id
+            """, (album_ids,))
+            sizes = {r[0]: (r[1] or 0) for r in cur.fetchall()}
     for row in rows:
-        row["size_bytes"] = _album_size_bytes(row.get("nas_path", ""))
+        row["size_bytes"] = sizes.get(row["album_id"], 0)
     return rows
 
 
@@ -645,7 +649,20 @@ def get_suggestions(card_id):
             else:
                 seed_genre_ids = set()
 
-            used_bytes  = sum(_album_size_bytes(r["nas_path"]) for r in seed_rows)
+            if seed_ids:
+                cur.execute("""
+                    SELECT COALESCE(
+                        ROUND(SUM(t.duration_secs *
+                                  COALESCE(t.sample_rate, 44100) *
+                                  COALESCE(t.bit_depth, 16) *
+                                  COALESCE(t.channels, 2)) / 8.0 * 0.60
+                        )::BIGINT, 0)
+                    FROM tracks t WHERE t.album_id = ANY(%s)
+                """, (list(seed_ids),))
+                used_bytes = cur.fetchone()[0] or 0
+            else:
+                used_bytes = 0
+
             remaining   = target_bytes - used_bytes
             fill_target = remaining
 
@@ -653,18 +670,28 @@ def get_suggestions(card_id):
                 return jsonify({"suggestions": [], "remaining_bytes": remaining})
 
             cur.execute("""
+                WITH track_sizes AS (
+                    SELECT album_id,
+                           ROUND(SUM(duration_secs *
+                                     COALESCE(sample_rate, 44100) *
+                                     COALESCE(bit_depth, 16) *
+                                     COALESCE(channels, 2)) / 8.0 * 0.60)::BIGINT AS size_bytes
+                    FROM tracks
+                    GROUP BY album_id
+                )
                 SELECT al.id, al.title, ar.name AS artist, al.year,
                        al.nas_path, al.is_compilation, al.artist_id,
+                       ts.size_bytes,
                        COALESCE(string_agg(DISTINCT g.name, ', ' ORDER BY g.name), '') AS genres,
                        array_agg(DISTINCT ag.genre_id) AS genre_ids
                 FROM albums al
                 JOIN artists ar ON ar.id = al.artist_id
+                JOIN track_sizes ts ON ts.album_id = al.id
                 LEFT JOIN album_genres ag ON ag.album_id = al.id
                 LEFT JOIN genres g ON g.id = ag.genre_id
-                WHERE al.id != ALL(%s)
+                WHERE al.id != ALL(%s) AND ts.size_bytes > 0
                 GROUP BY al.id, al.title, ar.name, ar.sort_name, al.year,
-                         al.nas_path, al.is_compilation, al.artist_id
-                ORDER BY ar.sort_name, al.title
+                         al.nas_path, al.is_compilation, al.artist_id, ts.size_bytes
             """, (list(seed_ids) if seed_ids else [0],))
             candidates = cur.fetchall()
 
@@ -692,7 +719,7 @@ def get_suggestions(card_id):
     for row in scored:
         if space_left <= 0:
             break
-        sz = _album_size_bytes(row["nas_path"])
+        sz = row["size_bytes"]
         if sz == 0 or sz > space_left:
             continue
         suggestions.append({
