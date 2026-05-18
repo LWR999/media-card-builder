@@ -2,7 +2,6 @@
 
 Applies to each album directory after files are copied:
 - Resize embedded FLAC cover art (800px max, JPEG quality 95)
-- Write cover.jpg sidecar
 - Tag _ prefix folders as compilations
 - Remove Mac detritus (.DS_Store, ._* files)
 - Strip extended attributes (xattr -cr equivalent)
@@ -17,7 +16,6 @@ from PIL import Image
 
 MAX_WIDTH = 500
 JPEG_QUALITY = 95
-COVER_FILENAME = "cover.jpg"
 MAC_DETRITUS = {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd"}
 
 
@@ -140,27 +138,16 @@ def process_album_directory(dest_dir: Path, log=None) -> dict:
         if sub.is_dir() and not sub.name.startswith("."):
             flac_files += sorted(sub.glob("*.flac"))
 
-    cover_bytes = None
     processed = 0
 
     for flac_path in flac_files:
         if is_compilation:
             _tag_compilation(flac_path, album_name)
-        art = _process_flac_art(flac_path)
-        if art and cover_bytes is None:
-            cover_bytes = art
+        _process_flac_art(flac_path)
         processed += 1
-
-    if cover_bytes:
-        cover_path = dest_dir / COVER_FILENAME
-        try:
-            cover_path.write_bytes(cover_bytes)
-            _log(f"  Wrote {COVER_FILENAME}")
-        except OSError as e:
-            _log(f"  cover.jpg write failed: {e}")
 
     _remove_mac_detritus(dest_dir)
     _strip_xattrs(dest_dir)
 
     _log(f"  Processed {processed} FLACs, compilation={is_compilation}")
-    return {"flacs_processed": processed, "is_compilation": is_compilation, "cover_written": cover_bytes is not None}
+    return {"flacs_processed": processed, "is_compilation": is_compilation}
