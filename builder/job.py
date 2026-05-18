@@ -1,5 +1,11 @@
-"""Build job: copies albums to staging path and applies prep processing."""
+"""Build job: keeps staging in sync with the card definition.
+
+Staging is the permanent working copy for a device. Build adds new albums,
+removes albums deleted from the card, and leaves unrecognised folders alone.
+The SD card is a transient rsync dump of staging whenever needed.
+"""
 import logging
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -135,6 +141,22 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
                 _append_log(card_id, f"  ERROR: {e}")
                 _jobs[card_id]["errors"].append(f"[Personal] {display_name}: {e}")
 
+        # Remove staging folders that are no longer in the card definition.
+        # Keeps only expected album folders, personal content folders, and
+        # anything that looks like an unmanaged/system folder (starts with dot).
+        expected = {Path(nas_path).name for _, _, _, nas_path in album_rows}
+        personal = {fn for fn, _ in personal_rows}
+        removed = 0
+        for child in output_root.iterdir():
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if child.name not in expected and child.name not in personal:
+                _append_log(card_id, f"Removing orphaned staging folder: {child.name}")
+                shutil.rmtree(child, ignore_errors=True)
+                removed += 1
+        if removed:
+            _append_log(card_id, f"Removed {removed} orphaned folder(s) from staging.")
+
         cur.execute("UPDATE cards SET status = 'built', last_built_at = NOW() WHERE id = %s", (card_id,))
         conn.commit()
         _update_job(card_id, status="done", done=total)
@@ -152,7 +174,6 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
 
 def _copy_album(src_dir: Path, dest_dir: Path):
-    import shutil
     dest_dir.mkdir(parents=True, exist_ok=True)
     for item in src_dir.rglob("*"):
         if item.name.startswith("._") or item.name == ".DS_Store":
@@ -167,7 +188,6 @@ def _copy_album(src_dir: Path, dest_dir: Path):
 
 def _copy_dir(src_dir: Path, dest_dir: Path):
     """Copy all files from src to dest, skipping macOS metadata files."""
-    import shutil
     dest_dir.mkdir(parents=True, exist_ok=True)
     for item in src_dir.rglob("*"):
         if item.name.startswith("._") or item.name == ".DS_Store":
