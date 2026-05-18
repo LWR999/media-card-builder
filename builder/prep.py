@@ -122,8 +122,13 @@ def _strip_xattrs(directory: Path):
         pass
 
 
-def process_album_directory(dest_dir: Path, log=None) -> dict:
-    """Apply bentley_media_prep logic to a copied album directory."""
+def process_album_directory(dest_dir: Path, log=None, resize_artwork: bool = True) -> dict:
+    """Clean and optionally process a copied album directory.
+
+    resize_artwork should only be True for device profiles that need it
+    (e.g. bentley). Skipping it avoids a full read+rewrite pass of every
+    FLAC file, which is the dominant cost for large builds.
+    """
     def _log(msg):
         if log:
             log(msg)
@@ -132,22 +137,23 @@ def process_album_directory(dest_dir: Path, log=None) -> dict:
     is_compilation = folder_name.startswith("_")
     album_name = folder_name[1:] if is_compilation else folder_name
 
-    flac_files = sorted(dest_dir.glob("*.flac"))
-    # also check disc subdirs
-    for sub in sorted(dest_dir.iterdir()):
-        if sub.is_dir() and not sub.name.startswith("."):
-            flac_files += sorted(sub.glob("*.flac"))
-
     processed = 0
 
-    for flac_path in flac_files:
-        if is_compilation:
-            _tag_compilation(flac_path, album_name)
-        _process_flac_art(flac_path)
-        processed += 1
+    if is_compilation or resize_artwork:
+        flac_files = sorted(dest_dir.glob("*.flac"))
+        for sub in sorted(dest_dir.iterdir()):
+            if sub.is_dir() and not sub.name.startswith("."):
+                flac_files += sorted(sub.glob("*.flac"))
+
+        for flac_path in flac_files:
+            if is_compilation:
+                _tag_compilation(flac_path, album_name)
+            if resize_artwork:
+                _process_flac_art(flac_path)
+            processed += 1
 
     _remove_mac_detritus(dest_dir)
     _strip_xattrs(dest_dir)
 
-    _log(f"  Processed {processed} FLACs, compilation={is_compilation}")
+    _log(f"  Processed {processed} FLACs, compilation={is_compilation}, resize_art={resize_artwork}")
     return {"flacs_processed": processed, "is_compilation": is_compilation}
