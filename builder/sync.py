@@ -1,7 +1,28 @@
 """Sync job: rsync staged build to SD card mount."""
+import os
 import subprocess
 import threading
 import time
+from pathlib import Path
+
+_MAC_DETRITUS = {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd"}
+
+
+def _clean_staging(stage_path: str, log_fn):
+    """Remove Mac detritus from the staging root before rsync."""
+    removed = 0
+    for root, dirs, files in os.walk(stage_path):
+        root_path = Path(root)
+        for fname in files:
+            if fname.startswith("._") or fname in _MAC_DETRITUS:
+                try:
+                    (root_path / fname).unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        dirs[:] = [d for d in dirs if d not in _MAC_DETRITUS]
+    if removed:
+        log_fn(f"Removed {removed} Mac detritus file(s) from staging.")
 
 _jobs: dict[int, dict] = {}
 _lock = threading.Lock()
@@ -50,6 +71,7 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
             cmd += ["--exclude", folder.rstrip("/") + "/"]
         cmd += [src, dst]
 
+        _clean_staging(stage_path, lambda msg: _append_log(card_id, msg))
         _append_log(card_id, f"rsync {src} → {dst}")
         if unmanaged_folders:
             _append_log(card_id,
