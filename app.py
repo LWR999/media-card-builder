@@ -28,7 +28,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 NAS_ROOT     = os.environ.get("NAS_MUSIC_PATH",    "").rstrip("/")
 NAS_STAGE    = os.environ.get("NAS_STAGE_PATH",   "").rstrip("/")
 NAS_PERSONAL = os.environ.get("NAS_PERSONAL_PATH","").rstrip("/")
-BUILD_ALBUM_DELAY = float(os.environ.get("BUILD_ALBUM_DELAY", "2.0"))
+BUILD_ALBUM_DELAY = float(os.environ.get("BUILD_ALBUM_DELAY", "0.5"))
 
 # Cards are sold in base-10 GB (10^9 bytes); ExFAT also uses space for
 # metadata. 92% of nominal GB gives safe usable capacity.

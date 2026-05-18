@@ -32,7 +32,7 @@ def _update_job(card_id: int, **kwargs):
 
 
 def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-                personal_root: str = "", album_delay: float = 2.0) -> bool:
+                personal_root: str = "", album_delay: float = 0.5) -> bool:
     with _lock:
         if card_id in _jobs and _jobs[card_id].get("status") == "running":
             return False
@@ -55,7 +55,7 @@ def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
 
 def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-               personal_root: str = "", album_delay: float = 2.0):
+               personal_root: str = "", album_delay: float = 0.5):
     conn = None
     try:
         conn = psycopg2.connect(**db_params)
