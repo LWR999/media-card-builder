@@ -603,6 +603,13 @@ el('btn-dismiss-suggestions').addEventListener('click', () => {
 el('btn-build').addEventListener('click', async () => {
   if (!activeCardId) return;
   try {
+    const pending = suggestions.filter(s => s._pending);
+    if (pending.length) {
+      await api('POST', `/api/cards/${activeCardId}/suggestions/accept`,
+                { album_ids: pending.map(s => s.id) });
+      suggestions.forEach(s => s._pending = false);
+      el('suggestions-section').classList.add('hidden');
+    }
     await api('POST', `/api/cards/${activeCardId}/build`);
     startBuildSSE();
   } catch (e) { showErr(e.message); }

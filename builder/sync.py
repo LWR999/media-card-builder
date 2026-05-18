@@ -43,7 +43,8 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
         src = stage_path.rstrip("/") + "/"
         dst = card_mount_path.rstrip("/") + "/"
 
-        cmd = ["rsync", "-rltv", "--no-perms", "--no-owner", "--no-group", "--delete"]
+        cmd = ["rsync", "-rlv", "--no-perms", "--no-owner", "--no-group",
+               "--omit-dir-times", "--modify-window=2", "--delete"]
         for folder in unmanaged_folders:
             # Exclude by folder name so --delete doesn't remove them from the card
             cmd += ["--exclude", folder.rstrip("/") + "/"]
