@@ -28,6 +28,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 NAS_ROOT     = os.environ.get("NAS_MUSIC_PATH",    "").rstrip("/")
 NAS_STAGE    = os.environ.get("NAS_STAGE_PATH",   "").rstrip("/")
 NAS_PERSONAL = os.environ.get("NAS_PERSONAL_PATH","").rstrip("/")
+BUILD_ALBUM_DELAY = float(os.environ.get("BUILD_ALBUM_DELAY", "2.0"))
 
 # Cards are sold in base-10 GB (10^9 bytes); ExFAT also uses space for
 # metadata. 92% of nominal GB gives safe usable capacity.
@@ -782,7 +783,8 @@ def start_build_route(card_id):
     if not stage:
         return jsonify({"error": "NAS_STAGE_PATH not configured in .env"}), 500
 
-    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL)
+    started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL,
+                                     album_delay=BUILD_ALBUM_DELAY)
     if not started:
         return jsonify({"error": "already running"}), 409
     return jsonify({"ok": True, "stage_path": str(stage)})

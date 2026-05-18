@@ -32,7 +32,7 @@ def _update_job(card_id: int, **kwargs):
 
 
 def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-                personal_root: str = "") -> bool:
+                personal_root: str = "", album_delay: float = 2.0) -> bool:
     with _lock:
         if card_id in _jobs and _jobs[card_id].get("status") == "running":
             return False
@@ -48,14 +48,14 @@ def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
     threading.Thread(
         target=_run_build,
-        args=(card_id, db_params, nas_root, stage_path, personal_root),
+        args=(card_id, db_params, nas_root, stage_path, personal_root, album_delay),
         daemon=True,
     ).start()
     return True
 
 
 def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-               personal_root: str = ""):
+               personal_root: str = "", album_delay: float = 2.0):
     conn = None
     try:
         conn = psycopg2.connect(**db_params)
@@ -110,6 +110,8 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
             try:
                 _copy_album(src_dir, dest_dir)
                 process_album_directory(dest_dir, log=lambda m: _append_log(card_id, m))
+                if album_delay > 0:
+                    time.sleep(album_delay)
             except Exception as e:
                 _append_log(card_id, f"  ERROR: {e}")
                 _jobs[card_id]["errors"].append(f"{artist} - {title}: {e}")
