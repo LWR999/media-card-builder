@@ -52,10 +52,19 @@ def _process_flac_art(flac_path: Path, max_width: int = MAX_WIDTH) -> bytes | No
 
     first_jpeg_bytes = None
     new_pictures = []
+    any_changed = False
 
     for pic in pictures:
         try:
             img = Image.open(BytesIO(pic.data))
+            needs_resize = img.width > max_width
+            needs_convert = pic.mime != "image/jpeg"
+            if not needs_resize and not needs_convert:
+                new_pictures.append(pic)
+                if first_jpeg_bytes is None:
+                    first_jpeg_bytes = pic.data
+                continue
+            any_changed = True
             img = _resize_image(img, max_width)
             img_rgb = _normalize_for_jpeg(img)
             buf = BytesIO()
@@ -77,13 +86,14 @@ def _process_flac_art(flac_path: Path, max_width: int = MAX_WIDTH) -> bytes | No
         except Exception:
             new_pictures.append(pic)
 
-    audio.clear_pictures()
-    for p in new_pictures:
-        audio.add_picture(p)
-    try:
-        audio.save()
-    except Exception:
-        pass
+    if any_changed:
+        audio.clear_pictures()
+        for p in new_pictures:
+            audio.add_picture(p)
+        try:
+            audio.save()
+        except Exception:
+            pass
 
     return first_jpeg_bytes
 
