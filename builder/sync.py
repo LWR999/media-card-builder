@@ -45,9 +45,12 @@ def _sanitize_staging(stage_path: str, log_fn):
             if safe and safe != name:
                 src = root_path / name
                 dst = root_path / safe
-                if src.exists() and not dst.exists():
+                if src.exists():
                     try:
-                        src.rename(dst)
+                        if dst.exists():
+                            src.unlink()  # sanitized copy already exists; remove the illegal-char duplicate
+                        else:
+                            src.rename(dst)
                         renamed += 1
                     except OSError:
                         pass
