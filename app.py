@@ -958,7 +958,7 @@ def import_from_card(card_id):
 
     def _match(folder):
         """Match a folder to a DB album: folder name first, FLAC tags as fallback."""
-        album_id = album_by_folder.get(_norm(folder.name))
+        album_id = album_by_folder.get(_norm(_decode_name(folder)))
         if album_id:
             return album_id
         flacs = [f for f in folder.rglob("*.flac") if not f.name.startswith("._")][:3]
