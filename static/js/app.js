@@ -680,18 +680,6 @@ el('btn-sync').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
-el('btn-eject').addEventListener('click', async () => {
-  if (!activeCardId) return;
-  if (!activeCard?.card_mount_path) {
-    alert('No card mount path set.');
-    return;
-  }
-  try {
-    await api('POST', `/api/cards/${activeCardId}/eject`);
-    alert('Card ejected safely.');
-  } catch (e) { showErr(e.message); }
-});
-
 function startSyncSSE() {
   if (syncSSE) syncSSE.close();
   el('sync-section').classList.remove('hidden');
