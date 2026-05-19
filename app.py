@@ -928,6 +928,13 @@ def import_from_card(card_id):
         return jsonify({"error": "card_mount_path not set"}), 400
 
     mount_path = Path(mount)
+
+    def _decode_name(p: Path) -> str:
+        """Decode surrogate-escaped bytes (e.g. Latin-1 filenames) to a clean string."""
+        try:
+            return p.name.encode('utf-8', 'surrogateescape').decode('utf-8')
+        except UnicodeDecodeError:
+            return p.name.encode('utf-8', 'surrogateescape').decode('latin-1')
     if not mount_path.exists():
         return jsonify({"error": f"Mount path not found: {mount}"}), 400
 
@@ -991,7 +998,7 @@ def import_from_card(card_id):
             matched_ids.extend(sub_matches)
         else:
             size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
-            unmanaged.append({"folder_name": item.name, "size_bytes": size})
+            unmanaged.append({"folder_name": _decode_name(item), "size_bytes": size})
 
     # Classify unmanaged folders: if the folder exists under NAS_PERSONAL_PATH,
     # treat it as personal content rather than unmanaged.
