@@ -24,7 +24,7 @@ _lock = threading.Lock()
 
 
 def _sanitize_exfat(name: str) -> str:
-    return ' '.join(name.translate(_EXFAT_TRANSLATE).split())
+    return ' '.join(name.translate(_EXFAT_TRANSLATE).split()).rstrip('.')
 
 
 def get_job(card_id: int) -> dict | None:

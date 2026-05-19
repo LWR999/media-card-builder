@@ -15,7 +15,7 @@ _EXFAT_TRANSLATE = str.maketrans({':': '-', '*': '', '?': '', '"': "'", '<': '',
 
 
 def _sanitize_exfat(name: str) -> str:
-    return ' '.join(name.translate(_EXFAT_TRANSLATE).split())
+    return ' '.join(name.translate(_EXFAT_TRANSLATE).split()).rstrip('.')
 
 
 def _clean_staging(stage_path: str, log_fn):
