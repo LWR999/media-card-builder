@@ -893,9 +893,12 @@ def eject_card(card_id):
     mount = (card.get("card_mount_path") or "").strip()
     if not mount:
         return jsonify({"error": "card_mount_path not set"}), 400
-    result = subprocess.run(["umount", mount], capture_output=True, text=True)
+    result = subprocess.run(
+        ["udisksctl", "unmount", "--mount-point", mount],
+        capture_output=True, text=True,
+    )
     if result.returncode != 0:
-        return jsonify({"error": result.stderr.strip() or "umount failed"}), 500
+        return jsonify({"error": result.stderr.strip() or "unmount failed"}), 500
     return jsonify({"ok": True})
 
 
