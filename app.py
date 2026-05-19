@@ -893,12 +893,8 @@ def eject_card(card_id):
     mount = (card.get("card_mount_path") or "").strip()
     if not mount:
         return jsonify({"error": "card_mount_path not set"}), 400
-    fm = subprocess.run(["findmnt", "-n", "-o", "SOURCE", mount], capture_output=True, text=True)
-    device = fm.stdout.strip()
-    if not device:
-        return jsonify({"error": f"Nothing mounted at {mount}"}), 400
     result = subprocess.run(
-        ["udisksctl", "unmount", "-b", device, "--no-user-interaction"],
+        ["sudo", "umount", mount],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
