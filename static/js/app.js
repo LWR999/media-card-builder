@@ -189,6 +189,21 @@ async function refreshCard() {
   renderCardAlbums();
   renderPersonal();
   renderUnmanaged();
+  await reattachJobs();
+}
+
+async function reattachJobs() {
+  if (!activeCardId) return;
+  try {
+    if (!buildSSE) {
+      const b = await api('GET', `/api/cards/${activeCardId}/build/status`);
+      if (b.status === 'running') startBuildSSE();
+    }
+    if (!syncSSE) {
+      const s = await api('GET', `/api/cards/${activeCardId}/sync/status`);
+      if (s.status === 'running') startSyncSSE();
+    }
+  } catch (_) {}
 }
 
 // ── Stage status pill ──────────────────────────────────────────────────────

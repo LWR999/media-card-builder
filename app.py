@@ -798,6 +798,14 @@ def build_status(card_id):
     return jsonify(state)
 
 
+@app.get("/api/cards/<int:card_id>/sync/status")
+def sync_status(card_id):
+    state = sync_job.get_job(card_id)
+    if not state:
+        return jsonify({"status": "idle"})
+    return jsonify(state)
+
+
 @app.get("/api/cards/<int:card_id>/build/stream")
 def build_stream(card_id):
     def generate():
