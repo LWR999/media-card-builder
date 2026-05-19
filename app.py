@@ -993,6 +993,20 @@ def import_from_card(card_id):
             size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
             unmanaged.append({"folder_name": item.name, "size_bytes": size})
 
+    # Classify unmanaged folders: if the folder exists under NAS_PERSONAL_PATH,
+    # treat it as personal content rather than unmanaged.
+    personal_items = []
+    true_unmanaged = []
+    if NAS_PERSONAL:
+        personal_root = Path(NAS_PERSONAL)
+        for u in unmanaged:
+            if (personal_root / u["folder_name"]).exists():
+                personal_items.append(u)
+            else:
+                true_unmanaged.append(u)
+    else:
+        true_unmanaged = unmanaged
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             for album_id in matched_ids:
@@ -1001,18 +1015,26 @@ def import_from_card(card_id):
                     VALUES (%s, %s, 'user', true)
                     ON CONFLICT (card_id, album_id) DO NOTHING
                 """, (card_id, album_id))
-            for u in unmanaged:
+            for u in true_unmanaged:
                 cur.execute("""
                     INSERT INTO card_unmanaged_paths (card_id, folder_name, size_bytes)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (card_id, folder_name) DO UPDATE SET size_bytes = EXCLUDED.size_bytes
                 """, (card_id, u["folder_name"], u["size_bytes"]))
+            for p in personal_items:
+                cur.execute("""
+                    INSERT INTO card_personal_items (card_id, folder_name, display_name, size_bytes)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (card_id, folder_name) DO UPDATE SET size_bytes = EXCLUDED.size_bytes
+                """, (card_id, p["folder_name"], p["folder_name"], p["size_bytes"]))
         conn.commit()
 
     return jsonify({
         "matched":            len(matched_ids),
-        "unmanaged":          len(unmanaged),
-        "unmanaged_folders":  [u["folder_name"] for u in unmanaged],
+        "personal":           len(personal_items),
+        "personal_folders":   [p["folder_name"] for p in personal_items],
+        "unmanaged":          len(true_unmanaged),
+        "unmanaged_folders":  [u["folder_name"] for u in true_unmanaged],
     })
 
 
@@ -1040,12 +1062,19 @@ def export_card_definition(card_id):
             """, (card_id,))
             albums = [dict(r) for r in cur.fetchall()]
 
+            cur.execute("""
+                SELECT folder_name, display_name, size_bytes
+                FROM card_personal_items WHERE card_id = %s ORDER BY display_name
+            """, (card_id,))
+            personal_items = [dict(r) for r in cur.fetchall()]
+
     definition = {
         "name":             card["name"],
         "target_size_gb":   float(card["target_size_gb"]),
         "device_profile":   card["device_profile"],
         "card_mount_path":  card["card_mount_path"],
         "albums":           albums,
+        "personal_items":   personal_items,
         "exported_at":      time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -1089,13 +1118,29 @@ def import_card_definition():
                     matched += 1
                 else:
                     unmatched.append(nas_path)
+
+            personal_imported = 0
+            for p in data.get("personal_items", []):
+                folder_name  = (p.get("folder_name")  or "").strip()
+                display_name = (p.get("display_name") or "").strip()
+                if not folder_name or not display_name:
+                    continue
+                cur.execute("""
+                    INSERT INTO card_personal_items (card_id, folder_name, display_name, size_bytes)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (card_id, folder_name) DO UPDATE
+                        SET display_name = EXCLUDED.display_name,
+                            size_bytes   = EXCLUDED.size_bytes
+                """, (card_id, folder_name, display_name, p.get("size_bytes", 0)))
+                personal_imported += 1
         conn.commit()
 
     return jsonify({
-        "id":              card_id,
-        "matched":         matched,
-        "unmatched":       len(unmatched),
-        "unmatched_paths": unmatched,
+        "id":               card_id,
+        "matched":          matched,
+        "unmatched":        len(unmatched),
+        "unmatched_paths":  unmatched,
+        "personal_imported": personal_imported,
     }), 201
 
 
