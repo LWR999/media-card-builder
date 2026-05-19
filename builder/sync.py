@@ -28,8 +28,14 @@ def _clean_staging(stage_path: str, log_fn):
     if removed:
         log_fn(f"Removed {removed} Mac detritus file(s) from staging.")
 
+_LOG_DIR = Path("logs")
+
 _jobs: dict[int, dict] = {}
 _lock = threading.Lock()
+
+
+def _log_file(card_id: int) -> Path:
+    return _LOG_DIR / f"sync_{card_id}.log"
 
 
 def get_job(card_id: int) -> dict | None:
@@ -48,6 +54,12 @@ def start_sync(card_id: int, stage_path: str, card_mount_path: str,
             "pct":        0,
             "started_at": time.time(),
         }
+    try:
+        _LOG_DIR.mkdir(exist_ok=True)
+        with _log_file(card_id).open("a") as f:
+            f.write(f"\n{'='*60}\n{time.strftime('%Y-%m-%d %H:%M:%S')} — sync started\n{'='*60}\n")
+    except OSError:
+        pass
     threading.Thread(
         target=_run_sync,
         args=(card_id, stage_path, card_mount_path, unmanaged_folders),
@@ -60,6 +72,11 @@ def _append_log(card_id: int, line: str):
     with _lock:
         if card_id in _jobs:
             _jobs[card_id]["log"].append(line)
+    try:
+        with _log_file(card_id).open("a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
