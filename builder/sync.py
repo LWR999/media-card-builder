@@ -6,7 +6,8 @@ import threading
 import time
 from pathlib import Path
 
-_PROGRESS_RE = re.compile(r'to-chk=(\d+)/(\d+)')
+_PROGRESS_RE   = re.compile(r'to-chk=(\d+)/(\d+)')
+_PROGRESS_LINE = re.compile(r'^\s*[\d,]+\s+\d+%')
 
 _MAC_DETRITUS = {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd"}
 
@@ -67,7 +68,7 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
         src = stage_path.rstrip("/") + "/"
         dst = card_mount_path.rstrip("/") + "/"
 
-        cmd = ["rsync", "-rl", "--no-perms", "--no-owner", "--no-group",
+        cmd = ["rsync", "-rlv", "--no-perms", "--no-owner", "--no-group",
                "--omit-dir-times", "--modify-window=2", "--delete",
                "--info=progress2"]
         for folder in unmanaged_folders:
@@ -95,15 +96,16 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
             line = line.rstrip()
             if not line:
                 continue
-            m = _PROGRESS_RE.search(line)
-            if m:
-                remaining = int(m.group(1))
-                total = int(m.group(2))
-                if total > 0:
-                    pct = int((total - remaining) / total * 100)
-                    with _lock:
-                        if card_id in _jobs:
-                            _jobs[card_id]["pct"] = pct
+            if _PROGRESS_LINE.match(line):
+                m = _PROGRESS_RE.search(line)
+                if m:
+                    remaining = int(m.group(1))
+                    total = int(m.group(2))
+                    if total > 0:
+                        pct = int((total - remaining) / total * 100)
+                        with _lock:
+                            if card_id in _jobs:
+                                _jobs[card_id]["pct"] = pct
             else:
                 _append_log(card_id, line)
 
