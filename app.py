@@ -898,7 +898,7 @@ def eject_card(card_id):
     if not device:
         return jsonify({"error": f"Nothing mounted at {mount}"}), 400
     result = subprocess.run(
-        ["udisksctl", "unmount", "-b", device],
+        ["udisksctl", "unmount", "-b", device, "--no-user-interaction"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
