@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+import subprocess
 import time
 import unicodedata
 from io import BytesIO
@@ -878,6 +879,23 @@ def start_sync_route(card_id):
     started = sync_job.start_sync(card_id, str(stage), card["card_mount_path"], unmanaged)
     if not started:
         return jsonify({"error": "already running"}), 409
+    return jsonify({"ok": True})
+
+
+@app.post("/api/cards/<int:card_id>/eject")
+def eject_card(card_id):
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT card_mount_path FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if not card:
+                return jsonify({"error": "not found"}), 404
+    mount = (card.get("card_mount_path") or "").strip()
+    if not mount:
+        return jsonify({"error": "card_mount_path not set"}), 400
+    result = subprocess.run(["umount", mount], capture_output=True, text=True)
+    if result.returncode != 0:
+        return jsonify({"error": result.stderr.strip() or "umount failed"}), 500
     return jsonify({"ok": True})
 
 
