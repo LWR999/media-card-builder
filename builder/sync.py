@@ -11,6 +11,12 @@ _PROGRESS_LINE = re.compile(r'^\s*[\d,]+\s+\d+%')
 
 _MAC_DETRITUS = {".DS_Store", ".Spotlight-V100", ".Trashes", ".fseventsd"}
 
+_EXFAT_TRANSLATE = str.maketrans({':': '-', '*': '', '?': '', '"': "'", '<': '', '>': '', '|': '-'})
+
+
+def _sanitize_exfat(name: str) -> str:
+    return ' '.join(name.translate(_EXFAT_TRANSLATE).split())
+
 
 def _clean_staging(stage_path: str, log_fn):
     """Remove Mac detritus from the staging root before rsync."""
@@ -27,6 +33,26 @@ def _clean_staging(stage_path: str, log_fn):
         dirs[:] = [d for d in dirs if d not in _MAC_DETRITUS]
     if removed:
         log_fn(f"Removed {removed} Mac detritus file(s) from staging.")
+
+
+def _sanitize_staging(stage_path: str, log_fn):
+    """Rename files/dirs in staging that contain exFAT-illegal characters."""
+    renamed = 0
+    for root, dirs, files in os.walk(stage_path, topdown=False):
+        root_path = Path(root)
+        for name in files + dirs:
+            safe = _sanitize_exfat(name)
+            if safe and safe != name:
+                src = root_path / name
+                dst = root_path / safe
+                if src.exists() and not dst.exists():
+                    try:
+                        src.rename(dst)
+                        renamed += 1
+                    except OSError:
+                        pass
+    if renamed:
+        log_fn(f"Renamed {renamed} staging item(s) with exFAT-illegal characters.")
 
 _LOG_DIR = Path("logs")
 
@@ -94,6 +120,7 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
         cmd += [src, dst]
 
         _clean_staging(stage_path, lambda msg: _append_log(card_id, msg))
+        _sanitize_staging(stage_path, lambda msg: _append_log(card_id, msg))
         _append_log(card_id, f"rsync {src} → {dst}")
         if unmanaged_folders:
             _append_log(card_id,

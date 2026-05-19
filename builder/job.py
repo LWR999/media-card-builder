@@ -16,8 +16,15 @@ from builder.prep import process_album_directory
 
 log = logging.getLogger(__name__)
 
+# Characters illegal on exFAT (Windows) filesystems
+_EXFAT_TRANSLATE = str.maketrans({':': '-', '*': '', '?': '', '"': "'", '<': '', '>': '', '|': '-'})
+
 _jobs: dict[int, dict] = {}
 _lock = threading.Lock()
+
+
+def _sanitize_exfat(name: str) -> str:
+    return ' '.join(name.translate(_EXFAT_TRANSLATE).split())
 
 
 def get_job(card_id: int) -> dict | None:
@@ -92,7 +99,7 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
         output_root.mkdir(parents=True, exist_ok=True)
 
         for idx, (album_id, artist, title, nas_path) in enumerate(album_rows):
-            folder_name = Path(nas_path).name
+            folder_name = _sanitize_exfat(Path(nas_path).name)
             dest_dir    = output_root / folder_name
             _update_job(card_id, current_album=f"{artist} - {title}", done=idx)
             _append_log(card_id, f"[{idx+1}/{total}] {artist} - {title}")
@@ -146,7 +153,7 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
         # Remove staging folders that are no longer in the card definition.
         # Keeps only expected album folders, personal content folders, and
         # anything that looks like an unmanaged/system folder (starts with dot).
-        expected = {Path(nas_path).name for _, _, _, nas_path in album_rows}
+        expected = {_sanitize_exfat(Path(nas_path).name) for _, _, _, nas_path in album_rows}
         personal = {fn for fn, _ in personal_rows}
         removed = 0
         for child in output_root.iterdir():
@@ -181,7 +188,7 @@ def _copy_album(src_dir: Path, dest_dir: Path):
         if item.name.startswith("._") or item.name == ".DS_Store":
             continue
         rel = item.relative_to(src_dir)
-        dst = dest_dir / rel
+        dst = dest_dir.joinpath(*[_sanitize_exfat(p) for p in rel.parts])
         if item.is_dir():
             dst.mkdir(parents=True, exist_ok=True)
         elif item.is_file() and item.suffix.lower() == ".flac":
@@ -189,13 +196,12 @@ def _copy_album(src_dir: Path, dest_dir: Path):
 
 
 def _copy_dir(src_dir: Path, dest_dir: Path):
-    """Copy all files from src to dest, skipping macOS metadata files."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     for item in src_dir.rglob("*"):
         if item.name.startswith("._") or item.name == ".DS_Store":
             continue
         rel = item.relative_to(src_dir)
-        dst = dest_dir / rel
+        dst = dest_dir.joinpath(*[_sanitize_exfat(p) for p in rel.parts])
         if item.is_dir():
             dst.mkdir(parents=True, exist_ok=True)
         elif item.is_file():
