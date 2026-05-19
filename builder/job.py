@@ -97,7 +97,7 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
             _update_job(card_id, current_album=f"{artist} - {title}", done=idx)
             _append_log(card_id, f"[{idx+1}/{total}] {artist} - {title}")
 
-            if dest_dir.exists() and any(dest_dir.glob("*.flac")):
+            if dest_dir.exists() and any(dest_dir.rglob("*.flac")):
                 _append_log(card_id, "  Skipped (already exists)")
                 continue
 
