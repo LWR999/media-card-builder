@@ -9,8 +9,8 @@ let buildSSE     = null;
 let syncSSE      = null;
 let searchTimer  = null;
 let currentResults = [];
-let sortBy  = 'artist';
-let sortAsc = true;
+let sortBy  = 'added';
+let sortAsc = false;
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 function fmt(bytes) {
