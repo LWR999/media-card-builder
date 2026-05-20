@@ -446,6 +446,8 @@ function sortedResults() {
       case 'title': va = a.title;      vb = b.title;      break;
       case 'year':  va = a.year || 0;  vb = b.year || 0;  break;
       case 'size':  va = a.size_bytes; vb = b.size_bytes;  break;
+      case 'added': va = a.added_at ? new Date(a.added_at).getTime() : 0;
+                    vb = b.added_at ? new Date(b.added_at).getTime() : 0; break;
       default:      va = a.artist;     vb = b.artist;      break;
     }
     const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
