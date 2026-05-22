@@ -665,10 +665,21 @@ el('btn-build').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
+function scrollToLog(sectionId) {
+  el(sectionId).scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+el('btn-jump-log').addEventListener('click', () => {
+  const buildVisible = !el('build-section').classList.contains('hidden');
+  scrollToLog(buildVisible ? 'build-section' : 'sync-section');
+});
+
 function startBuildSSE() {
   if (buildSSE) buildSSE.close();
   el('build-section').classList.remove('hidden');
+  el('btn-jump-log').classList.remove('hidden');
   el('build-log').textContent = '';
+  scrollToLog('build-section');
   buildSSE = new EventSource(`/api/cards/${activeCardId}/build/stream`);
   buildSSE.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -681,7 +692,9 @@ function startBuildSSE() {
       el('build-log').scrollTop = el('build-log').scrollHeight;
     }
     if (d.status === 'done' || d.status === 'error') {
-      buildSSE.close(); buildSSE = null; refreshCard(); loadCards();
+      buildSSE.close(); buildSSE = null;
+      el('btn-jump-log').classList.add('hidden');
+      refreshCard(); loadCards();
     }
   };
   buildSSE.onerror = () => { if (buildSSE) { buildSSE.close(); buildSSE = null; } };
@@ -711,7 +724,9 @@ el('btn-sync').addEventListener('click', async () => {
 function startSyncSSE() {
   if (syncSSE) syncSSE.close();
   el('sync-section').classList.remove('hidden');
+  el('btn-jump-log').classList.remove('hidden');
   el('sync-log').textContent = '';
+  scrollToLog('sync-section');
   syncSSE = new EventSource(`/api/cards/${activeCardId}/sync/stream`);
   syncSSE.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -723,6 +738,7 @@ function startSyncSSE() {
     }
     if (d.status === 'done' || d.status === 'error') {
       syncSSE.close(); syncSSE = null;
+      el('btn-jump-log').classList.add('hidden');
     }
   };
   syncSSE.onerror = () => { if (syncSSE) { syncSSE.close(); syncSSE = null; } };
