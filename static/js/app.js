@@ -213,12 +213,38 @@ function stagePill(status) {
 }
 
 // ── Card header ────────────────────────────────────────────────────────────
+function relativeTime(iso) {
+  if (!iso) return null;
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  <  1) return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
 function renderCardHeader() {
   const c = activeCard;
   el('card-name-display').innerHTML = esc(c.name) + stagePill(c.stage_status);
   const accepted = c.albums.filter(a => a.accepted);
-  el('card-stats-inline').textContent =
-    `${accepted.length} album${accepted.length !== 1 ? 's' : ''} · ${fmt(c.used_bytes)} / ${c.target_size_gb} GB`;
+
+  const parts = [
+    `${accepted.length} album${accepted.length !== 1 ? 's' : ''}`,
+    `${fmt(c.used_bytes)} / ${c.target_size_gb} GB`,
+  ];
+  if (c.staging_total > 0) {
+    const missing = c.staging_total - (c.staging_present || 0);
+    if (missing > 0)
+      parts.push(`${missing} of ${c.staging_total} not in staging`);
+    else
+      parts.push(`staging complete`);
+  }
+  const built = relativeTime(c.last_built_at);
+  if (built) parts.push(`built ${built}`);
+
+  el('card-stats-inline').textContent = parts.join(' · ');
 
   const status = c.stage_status || 'none';
   el('btn-build').textContent = status === 'none' ? 'Build' : 'Rebuild';

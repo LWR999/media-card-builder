@@ -59,6 +59,13 @@ def _safe_name(s: str) -> str:
     return re.sub(r"[^\w\-]", "_", s)[:60].strip("_")
 
 
+_EXFAT_TRANSLATE = str.maketrans({':': '-', '*': '', '?': '', '"': "'", '<': '', '>': '', '|': '-'})
+
+
+def _sanitize_exfat(name: str) -> str:
+    return ' '.join(name.translate(_EXFAT_TRANSLATE).split()).rstrip('.')
+
+
 def _stage_path(card: dict) -> Path | None:
     if not NAS_STAGE:
         return None
@@ -370,6 +377,15 @@ def get_card(card_id):
     unmanaged_bytes = sum(u["size_bytes"] for u in unmanaged)
     personal_bytes  = sum(p["size_bytes"] for p in personal)
 
+    accepted_albums = [a for a in albums if a["accepted"]]
+    staging_total   = len(accepted_albums)
+    staging_present = 0
+    if sp and sp.exists():
+        for a in accepted_albums:
+            folder = _sanitize_exfat(Path(a["nas_path"]).name)
+            if (sp / folder).exists():
+                staging_present += 1
+
     result = card
     result["albums"]           = albums
     result["unmanaged_paths"]  = unmanaged
@@ -380,7 +396,9 @@ def get_card(card_id):
     result["used_bytes"]       = album_bytes + unmanaged_bytes + personal_bytes
     result["target_bytes"]     = _card_target_bytes(float(card["target_size_gb"]))
     result["stage_path"]       = str(sp) if sp else None
-    result["stage_status"]    = _stage_status(card, sp)
+    result["stage_status"]     = _stage_status(card, sp)
+    result["staging_total"]    = staging_total
+    result["staging_present"]  = staging_present
     return jsonify(result)
 
 
