@@ -11,6 +11,8 @@ let searchTimer  = null;
 let currentResults = [];
 let sortBy  = 'added';
 let sortAsc = false;
+let cardSortBy  = 'artist';
+let cardSortAsc = true;
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 function fmt(bytes) {
@@ -270,15 +272,28 @@ function renderSpaceBar() {
 }
 
 // ── Card album list ────────────────────────────────────────────────────────
+function sortedCardAlbums() {
+  return [...activeCard.albums].sort((a, b) => {
+    let va, vb;
+    switch (cardSortBy) {
+      case 'title': va = a.title;     vb = b.title;     break;
+      case 'added': va = a.added_at ? new Date(a.added_at).getTime() : 0;
+                    vb = b.added_at ? new Date(b.added_at).getTime() : 0; break;
+      default:      va = a.sort_name || a.artist; vb = b.sort_name || b.artist; break;
+    }
+    const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+    return cardSortAsc ? cmp : -cmp;
+  });
+}
+
 function renderCardAlbums() {
-  const list   = el('card-albums');
+  const list = el('card-albums');
   list.innerHTML = '';
-  const albums = activeCard.albums;
-  if (!albums.length) {
+  if (!activeCard.albums.length) {
     list.innerHTML = '<div class="album-item" style="color:var(--muted);font-size:12px;padding:12px">No albums added yet.</div>';
     return;
   }
-  for (const a of albums) list.appendChild(buildCardAlbumRow(a));
+  for (const a of sortedCardAlbums()) list.appendChild(buildCardAlbumRow(a));
 }
 
 function buildCardAlbumRow(a) {
@@ -542,6 +557,13 @@ el('btn-sort-dir').addEventListener('click', () => {
   renderTileGrid();
 });
 
+el('card-sort-by').addEventListener('change', () => { cardSortBy = el('card-sort-by').value; renderCardAlbums(); });
+el('btn-card-sort-dir').addEventListener('click', () => {
+  cardSortAsc = !cardSortAsc;
+  el('btn-card-sort-dir').textContent = cardSortAsc ? '↑' : '↓';
+  renderCardAlbums();
+});
+
 // ── Search / filters ───────────────────────────────────────────────────────
 async function doSearch() {
   const q      = el('search-q').value.trim();
@@ -707,9 +729,14 @@ el('btn-sync').addEventListener('click', async () => {
     alert('Set a card mount path in Settings before syncing.');
     return;
   }
-  const status = activeCard?.stage_status || 'none';
+  const status  = activeCard?.stage_status || 'none';
+  const missing = (activeCard?.staging_total || 0) - (activeCard?.staging_present || 0);
   if (status === 'none') {
     alert('Build the card first — no staged content found.');
+    return;
+  }
+  if (missing > 0) {
+    alert(`${missing} album${missing !== 1 ? 's' : ''} haven't been built to staging yet.\n\nRebuild before syncing to include them.`);
     return;
   }
   if (status === 'stale') {

@@ -343,8 +343,8 @@ def get_card(card_id):
 
             cur.execute("""
                 SELECT ca.album_id, ca.added_by, ca.accepted,
-                       al.title, ar.name AS artist, al.year,
-                       al.nas_path, al.is_compilation,
+                       al.title, ar.name AS artist, ar.sort_name, al.year,
+                       al.nas_path, al.is_compilation, al.added_at,
                        COALESCE(string_agg(DISTINCT g.name, ', ' ORDER BY g.name), '') AS genres
                 FROM card_albums ca
                 JOIN albums al ON al.id = ca.album_id
@@ -353,7 +353,7 @@ def get_card(card_id):
                 LEFT JOIN genres g ON g.id = ag.genre_id
                 WHERE ca.card_id = %s
                 GROUP BY ca.album_id, ca.added_by, ca.accepted,
-                         al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation
+                         al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.added_at
                 ORDER BY ar.sort_name, al.title
             """, (card_id,))
             albums = _enrich_albums([dict(r) for r in cur.fetchall()])

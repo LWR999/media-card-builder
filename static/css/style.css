@@ -375,6 +375,14 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 .album-list {
   /* layout handled by #card-content-scroll */
 }
+.card-albums-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.card-albums-toolbar select { width: auto; font-size: 12px; padding: 4px 6px; }
 .album-item {
   display: flex;
   align-items: center;
