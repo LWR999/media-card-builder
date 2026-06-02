@@ -141,10 +141,6 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
             _update_job(card_id, current_album=f"[Personal] {display_name}", done=overall)
             _append_log(card_id, f"[{overall+1}/{total}] [Personal] {display_name}")
 
-            if dest_dir.exists():
-                _append_log(card_id, "  Skipped (already exists)")
-                continue
-
             if not personal_root_path:
                 _append_log(card_id, "  ERROR: NAS_PERSONAL_PATH not configured")
                 continue
@@ -155,11 +151,25 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
                 _jobs[card_id]["errors"].append(f"[Personal] {display_name}: source missing")
                 continue
 
-            try:
-                _copy_dir(src_dir, dest_dir)
-            except Exception as e:
-                _append_log(card_id, f"  ERROR: {e}")
-                _jobs[card_id]["errors"].append(f"[Personal] {display_name}: {e}")
+            if staging_mode == "symlink":
+                if dest_dir.exists() or dest_dir.is_symlink():
+                    _append_log(card_id, "  Skipped (symlink exists)")
+                    continue
+                try:
+                    dest_dir.symlink_to(src_dir)
+                    _append_log(card_id, "  → symlinked")
+                except Exception as e:
+                    _append_log(card_id, f"  ERROR: {e}")
+                    _jobs[card_id]["errors"].append(f"[Personal] {display_name}: {e}")
+            else:
+                if dest_dir.exists():
+                    _append_log(card_id, "  Skipped (already exists)")
+                    continue
+                try:
+                    _copy_dir(src_dir, dest_dir)
+                except Exception as e:
+                    _append_log(card_id, f"  ERROR: {e}")
+                    _jobs[card_id]["errors"].append(f"[Personal] {display_name}: {e}")
 
         # Remove staging folders that are no longer in the card definition.
         # Keeps only expected album folders, personal content folders, and
