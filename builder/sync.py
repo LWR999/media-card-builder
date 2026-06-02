@@ -73,7 +73,7 @@ def get_job(card_id: int) -> dict | None:
 
 
 def start_sync(card_id: int, stage_path: str, card_mount_path: str,
-               unmanaged_folders: list[str]) -> bool:
+               unmanaged_folders: list[str], staging_mode: str = "copy") -> bool:
     with _lock:
         if card_id in _jobs and _jobs[card_id].get("status") == "running":
             return False
@@ -91,7 +91,7 @@ def start_sync(card_id: int, stage_path: str, card_mount_path: str,
         pass
     threading.Thread(
         target=_run_sync,
-        args=(card_id, stage_path, card_mount_path, unmanaged_folders),
+        args=(card_id, stage_path, card_mount_path, unmanaged_folders, staging_mode),
         daemon=True,
     ).start()
     return True
@@ -109,7 +109,7 @@ def _append_log(card_id: int, line: str):
 
 
 def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
-              unmanaged_folders: list[str]):
+              unmanaged_folders: list[str], staging_mode: str = "copy"):
     try:
         src = stage_path.rstrip("/") + "/"
         dst = card_mount_path.rstrip("/") + "/"
@@ -117,6 +117,8 @@ def _run_sync(card_id: int, stage_path: str, card_mount_path: str,
         cmd = ["rsync", "-rlv", "--no-perms", "--no-owner", "--no-group",
                "--omit-dir-times", "--size-only", "--delete",
                "--info=progress2"]
+        if staging_mode == "symlink":
+            cmd.append("--copy-links")
         for folder in unmanaged_folders:
             # Exclude by folder name so --delete doesn't remove them from the card
             cmd += ["--exclude", folder.rstrip("/") + "/"]

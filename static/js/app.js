@@ -254,6 +254,9 @@ function renderCardHeader() {
   el('btn-sync').title        = status === 'none' ? 'Build first to create staging'
                               : status === 'stale' ? 'Staging is out of date — consider rebuilding first'
                               : '';
+
+  const hasSuggestions = c.albums.some(a => a.added_by === 'suggestion' && a.accepted);
+  el('btn-remove-suggestions').classList.toggle('hidden', !hasSuggestions);
 }
 
 // ── Space bar ──────────────────────────────────────────────────────────────
@@ -671,6 +674,17 @@ el('btn-dismiss-suggestions').addEventListener('click', () => {
   renderSpaceBar();
 });
 
+// ── Remove suggested albums ────────────────────────────────────────────────
+el('btn-remove-suggestions').addEventListener('click', async () => {
+  if (!activeCardId) return;
+  const count = activeCard?.albums.filter(a => a.added_by === 'suggestion' && a.accepted).length || 0;
+  if (!confirm(`Remove ${count} suggested album${count !== 1 ? 's' : ''} from this card?`)) return;
+  try {
+    await api('DELETE', `/api/cards/${activeCardId}/albums/suggestions`);
+    await refreshCard(); await doSearch();
+  } catch (e) { showErr(e.message); }
+});
+
 // ── Build ──────────────────────────────────────────────────────────────────
 el('btn-build').addEventListener('click', async () => {
   if (!activeCardId) return;
@@ -778,11 +792,12 @@ function fmtDur(s) {
 // ── Card settings modal ────────────────────────────────────────────────────
 el('btn-card-settings').addEventListener('click', () => {
   if (!activeCard) return;
-  el('cfg-name').value    = activeCard.name;
-  el('cfg-size').value    = activeCard.target_size_gb;
-  el('cfg-output').value  = activeCard.card_mount_path || '';
-  el('cfg-stage').value   = activeCard.stage_path || '(NAS_STAGE_PATH not configured)';
-  el('cfg-profile').value = activeCard.device_profile || 'generic';
+  el('cfg-name').value          = activeCard.name;
+  el('cfg-size').value          = activeCard.target_size_gb;
+  el('cfg-output').value        = activeCard.card_mount_path || '';
+  el('cfg-stage').value         = activeCard.stage_path || '(NAS_STAGE_PATH not configured)';
+  el('cfg-profile').value       = activeCard.device_profile || 'generic';
+  el('cfg-staging-mode').value  = activeCard.staging_mode || 'copy';
   el('modal-card-settings').classList.remove('hidden');
 });
 
@@ -793,6 +808,7 @@ el('btn-save-settings').addEventListener('click', async () => {
       target_size_gb:  parseFloat(el('cfg-size').value),
       card_mount_path: el('cfg-output').value.trim(),
       device_profile:  el('cfg-profile').value,
+      staging_mode:    el('cfg-staging-mode').value,
     });
     el('modal-card-settings').classList.add('hidden');
     await loadCards();

@@ -75,8 +75,9 @@
           <span id="card-name-display" class="card-title"></span>
           <span id="card-stats-inline" class="card-stats-inline"></span>
           <div class="card-actions">
-            <button id="btn-jump-log"       class="btn-secondary small hidden">↓ Log</button>
-            <button id="btn-suggest"       class="btn-secondary small">Fill suggestions</button>
+            <button id="btn-jump-log"            class="btn-secondary small hidden">↓ Log</button>
+            <button id="btn-remove-suggestions" class="btn-secondary small hidden">Remove suggested</button>
+            <button id="btn-suggest"            class="btn-secondary small">Fill suggestions</button>
             <button id="btn-card-settings" class="btn-secondary small">Settings</button>
             <button id="btn-delete-card"   class="btn-danger    small">Delete</button>
             <button id="btn-build"         class="btn-primary   small">Build</button>
@@ -244,6 +245,12 @@
         <option value="generic">Generic</option>
         <option value="bentley">Bentley</option>
         <option value="car">Car Stereo</option>
+      </select>
+    </label>
+    <label>Staging mode
+      <select id="cfg-staging-mode">
+        <option value="copy">Copy (full FLAC files)</option>
+        <option value="symlink">Symlink (fast build)</option>
       </select>
     </label>
     <div class="modal-actions">

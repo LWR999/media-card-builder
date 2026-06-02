@@ -155,6 +155,7 @@ def ensure_tables():
             cur.execute("ALTER TABLE cards ALTER COLUMN status SET DEFAULT 'draft'")
             cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_built_at    TIMESTAMPTZ")
             cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_modified_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS staging_mode     VARCHAR(10) NOT NULL DEFAULT 'copy'")
         conn.commit()
 
 
@@ -407,7 +408,7 @@ def update_card(card_id):
     data = request.json or {}
     fields = []
     vals = []
-    for col in ("name", "card_mount_path", "device_profile", "target_size_gb"):
+    for col in ("name", "card_mount_path", "device_profile", "target_size_gb", "staging_mode"):
         if col in data:
             fields.append(f"{col} = %s")
             vals.append(data[col])
@@ -518,6 +519,24 @@ def add_album(card_id):
             _touch_card(cur, card_id)
         conn.commit()
     return jsonify({"ok": True}), 201
+
+
+@app.delete("/api/cards/<int:card_id>/albums/suggestions")
+def remove_suggestion_albums(card_id):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM cards WHERE id = %s", (card_id,))
+            if not cur.fetchone():
+                return jsonify({"error": "not found"}), 404
+            cur.execute(
+                "DELETE FROM card_albums WHERE card_id = %s AND added_by = 'suggestion' RETURNING album_id",
+                (card_id,),
+            )
+            removed = cur.rowcount
+            if removed:
+                _touch_card(cur, card_id)
+        conn.commit()
+    return jsonify({"ok": True, "removed": removed})
 
 
 @app.delete("/api/cards/<int:card_id>/albums/<int:album_id>")
@@ -802,7 +821,8 @@ def start_build_route(card_id):
         return jsonify({"error": "NAS_STAGE_PATH not configured in .env"}), 500
 
     started = build_job.start_build(card_id, DB_PARAMS, NAS_ROOT, str(stage), NAS_PERSONAL,
-                                     album_delay=BUILD_ALBUM_DELAY)
+                                     album_delay=BUILD_ALBUM_DELAY,
+                                     staging_mode=card.get("staging_mode", "copy"))
     if not started:
         return jsonify({"error": "already running"}), 409
     return jsonify({"ok": True, "stage_path": str(stage)})
@@ -893,7 +913,8 @@ def start_sync_route(card_id):
     if not stage or not stage.exists():
         return jsonify({"error": "Staging directory not found - build the card first"}), 400
 
-    started = sync_job.start_sync(card_id, str(stage), card["card_mount_path"], unmanaged)
+    started = sync_job.start_sync(card_id, str(stage), card["card_mount_path"], unmanaged,
+                                   staging_mode=card.get("staging_mode", "copy"))
     if not started:
         return jsonify({"error": "already running"}), 409
     return jsonify({"ok": True})

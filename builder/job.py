@@ -39,7 +39,8 @@ def _update_job(card_id: int, **kwargs):
 
 
 def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-                personal_root: str = "", album_delay: float = 0.5) -> bool:
+                personal_root: str = "", album_delay: float = 0.5,
+                staging_mode: str = "copy") -> bool:
     with _lock:
         if card_id in _jobs and _jobs[card_id].get("status") == "running":
             return False
@@ -55,14 +56,14 @@ def start_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
 
     threading.Thread(
         target=_run_build,
-        args=(card_id, db_params, nas_root, stage_path, personal_root, album_delay),
+        args=(card_id, db_params, nas_root, stage_path, personal_root, album_delay, staging_mode),
         daemon=True,
     ).start()
     return True
 
 
 def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
-               personal_root: str = "", album_delay: float = 0.5):
+               personal_root: str = "", album_delay: float = 0.5, staging_mode: str = "copy"):
     conn = None
     try:
         conn = psycopg2.connect(**db_params)
@@ -104,24 +105,34 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
             _update_job(card_id, current_album=f"{artist} - {title}", done=idx)
             _append_log(card_id, f"[{idx+1}/{total}] {artist} - {title}")
 
-            if dest_dir.exists() and any(dest_dir.rglob("*.flac")):
-                _append_log(card_id, "  Skipped (already exists)")
-                continue
-
             src_dir = nas_root_path / nas_path
             if not src_dir.exists():
                 _append_log(card_id, f"  ERROR: source not found: {src_dir}")
                 _jobs[card_id]["errors"].append(f"{artist} - {title}: source missing")
                 continue
 
-            try:
-                _copy_album(src_dir, dest_dir)
-                process_album_directory(dest_dir, log=lambda m: _append_log(card_id, m))
-                if album_delay > 0:
-                    time.sleep(album_delay)
-            except Exception as e:
-                _append_log(card_id, f"  ERROR: {e}")
-                _jobs[card_id]["errors"].append(f"{artist} - {title}: {e}")
+            if staging_mode == "symlink":
+                if dest_dir.exists() or dest_dir.is_symlink():
+                    _append_log(card_id, "  Skipped (symlink exists)")
+                    continue
+                try:
+                    dest_dir.symlink_to(src_dir)
+                    _append_log(card_id, "  → symlinked")
+                except Exception as e:
+                    _append_log(card_id, f"  ERROR: {e}")
+                    _jobs[card_id]["errors"].append(f"{artist} - {title}: {e}")
+            else:
+                if dest_dir.exists() and any(dest_dir.rglob("*.flac")):
+                    _append_log(card_id, "  Skipped (already exists)")
+                    continue
+                try:
+                    _copy_album(src_dir, dest_dir)
+                    process_album_directory(dest_dir, log=lambda m: _append_log(card_id, m))
+                    if album_delay > 0:
+                        time.sleep(album_delay)
+                except Exception as e:
+                    _append_log(card_id, f"  ERROR: {e}")
+                    _jobs[card_id]["errors"].append(f"{artist} - {title}: {e}")
 
         personal_root_path = Path(personal_root) if personal_root else None
         for idx, (folder_name, display_name) in enumerate(personal_rows):
@@ -157,11 +168,16 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
         personal = {fn for fn, _ in personal_rows}
         removed = 0
         for child in output_root.iterdir():
-            if not child.is_dir() or child.name.startswith("."):
+            if child.name.startswith("."):
+                continue
+            if not child.is_dir() and not child.is_symlink():
                 continue
             if child.name not in expected and child.name not in personal:
                 _append_log(card_id, f"Removing orphaned staging folder: {child.name}")
-                shutil.rmtree(child, ignore_errors=True)
+                if child.is_symlink():
+                    child.unlink()
+                else:
+                    shutil.rmtree(child, ignore_errors=True)
                 removed += 1
         if removed:
             _append_log(card_id, f"Removed {removed} orphaned folder(s) from staging.")
