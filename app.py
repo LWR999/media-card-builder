@@ -357,12 +357,25 @@ def duplicate_card(card_id):
 
 @app.delete("/api/cards/<int:card_id>")
 def delete_card(card_id):
+    import shutil
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM cards WHERE id = %s RETURNING id", (card_id,))
-            if cur.fetchone() is None:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            card = cur.fetchone()
+            if card is None:
                 return jsonify({"error": "not found"}), 404
+            card = dict(card)
+            cur.execute("DELETE FROM cards WHERE id = %s", (card_id,))
         conn.commit()
+
+    sp = _stage_path(card)
+    if sp and sp.exists():
+        try:
+            shutil.rmtree(sp)
+            logging.info("Deleted staging directory: %s", sp)
+        except Exception as e:
+            logging.warning("Could not delete staging directory %s: %s", sp, e)
+
     return jsonify({"ok": True})
 
 
