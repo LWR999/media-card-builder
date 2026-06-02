@@ -188,6 +188,12 @@
         <option value="car">Car Stereo</option>
       </select>
     </label>
+    <label>Staging mode
+      <select id="new-card-staging-mode">
+        <option value="copy">Copy (full FLAC files)</option>
+        <option value="symlink">Symlink (fast build)</option>
+      </select>
+    </label>
     <div class="modal-actions">
       <button id="btn-create-card" class="btn-primary">Create</button>
       <button class="btn-secondary modal-close">Cancel</button>
@@ -254,9 +260,10 @@
       </select>
     </label>
     <div class="modal-actions">
-      <button id="btn-save-settings" class="btn-primary">Save</button>
-      <button id="btn-export-def"    class="btn-secondary">Export definition</button>
-      <button id="btn-import-def"    class="btn-secondary">Import definition</button>
+      <button id="btn-save-settings"  class="btn-primary">Save</button>
+      <button id="btn-duplicate-card" class="btn-secondary">Duplicate</button>
+      <button id="btn-export-def"     class="btn-secondary">Export definition</button>
+      <button id="btn-import-def"     class="btn-secondary">Import definition</button>
       <button class="btn-secondary modal-close">Cancel</button>
     </div>
   </div>

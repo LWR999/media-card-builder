@@ -829,6 +829,17 @@ el('btn-delete-card').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
+// ── Duplicate card ─────────────────────────────────────────────────────────
+el('btn-duplicate-card').addEventListener('click', async () => {
+  if (!activeCardId) return;
+  try {
+    const { id } = await api('POST', `/api/cards/${activeCardId}/duplicate`);
+    el('modal-card-settings').classList.add('hidden');
+    await loadCards();
+    selectCard(id);
+  } catch (e) { showErr(e.message); }
+});
+
 // ── Export card definition ─────────────────────────────────────────────────
 el('btn-export-def').addEventListener('click', () => {
   if (!activeCardId) return;
@@ -883,6 +894,7 @@ el('btn-create-card').addEventListener('click', async () => {
       target_size_gb:  size,
       card_mount_path: el('new-card-output').value.trim(),
       device_profile:  el('new-card-profile').value,
+      staging_mode:    el('new-card-staging-mode').value,
     });
     el('modal-new-card').classList.add('hidden');
     el('new-card-name').value   = '';

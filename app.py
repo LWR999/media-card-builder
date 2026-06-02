@@ -311,14 +311,48 @@ def create_card():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO cards (name, target_size_gb, card_mount_path, device_profile)
-                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                """INSERT INTO cards (name, target_size_gb, card_mount_path, device_profile, staging_mode)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
                 (name, target_gb,
-                 data.get("card_mount_path"), data.get("device_profile", "generic")),
+                 data.get("card_mount_path"), data.get("device_profile", "generic"),
+                 data.get("staging_mode", "copy")),
             )
             card_id = cur.fetchone()[0]
         conn.commit()
     return jsonify({"id": card_id}), 201
+
+
+@app.post("/api/cards/<int:card_id>/duplicate")
+def duplicate_card(card_id):
+    with get_conn() as conn:
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM cards WHERE id = %s", (card_id,))
+            src = cur.fetchone()
+            if not src:
+                return jsonify({"error": "not found"}), 404
+            src = dict(src)
+
+            cur.execute(
+                """INSERT INTO cards (name, target_size_gb, card_mount_path, device_profile, staging_mode)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (f"{src['name']} (copy)", src["target_size_gb"],
+                 src["card_mount_path"], src["device_profile"], src["staging_mode"]),
+            )
+            new_id = cur.fetchone()["id"]
+
+            cur.execute("""
+                INSERT INTO card_albums (card_id, album_id, added_by, accepted, added_at)
+                SELECT %s, album_id, added_by, accepted, NOW()
+                FROM card_albums WHERE card_id = %s
+            """, (new_id, card_id))
+
+            cur.execute("""
+                INSERT INTO card_personal_items (card_id, folder_name, display_name, size_bytes)
+                SELECT %s, folder_name, display_name, size_bytes
+                FROM card_personal_items WHERE card_id = %s
+            """, (new_id, card_id))
+        conn.commit()
+    return jsonify({"id": new_id}), 201
 
 
 @app.delete("/api/cards/<int:card_id>")
