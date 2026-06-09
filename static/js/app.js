@@ -485,6 +485,33 @@ el('btn-add-personal').addEventListener('click', async () => {
 // ── Tile grid ──────────────────────────────────────────────────────────────
 function sortedResults() {
   return [...currentResults].sort((a, b) => {
+    // Card-aware sorts: on-card albums first (by title), then off-card by secondary criterion
+    if (sortBy === 'card_date' || sortBy === 'card_title' || sortBy === 'card_artist') {
+      const aOn = a.on_card ? 0 : 1;
+      const bOn = b.on_card ? 0 : 1;
+      if (aOn !== bOn) return aOn - bOn;
+
+      // On-card group: always by title
+      if (a.on_card) {
+        const cmp = a.title.localeCompare(b.title);
+        return sortAsc ? cmp : -cmp;
+      }
+
+      // Off-card group: secondary criterion
+      let cmp;
+      if (sortBy === 'card_date') {
+        const va = a.added_at ? new Date(a.added_at).getTime() : 0;
+        const vb = b.added_at ? new Date(b.added_at).getTime() : 0;
+        cmp = va - vb;
+      } else if (sortBy === 'card_title') {
+        cmp = a.title.localeCompare(b.title);
+      } else {
+        cmp = (a.artist || '').localeCompare(b.artist || '');
+        if (cmp === 0) cmp = a.title.localeCompare(b.title);
+      }
+      return sortAsc ? cmp : -cmp;
+    }
+
     let va, vb;
     switch (sortBy) {
       case 'title': va = a.title;      vb = b.title;      break;
