@@ -486,14 +486,16 @@ el('btn-add-personal').addEventListener('click', async () => {
 function sortedResults() {
   return [...currentResults].sort((a, b) => {
     // Card-aware sorts: on-card albums first (by title), then off-card by secondary criterion
-    if (sortBy === 'card_date' || sortBy === 'card_title' || sortBy === 'card_artist') {
+    if (sortBy === 'card_date' || sortBy === 'card_title' || sortBy === 'card_artist' || sortBy === 'card_played') {
       const aOn = a.on_card ? 0 : 1;
       const bOn = b.on_card ? 0 : 1;
       if (aOn !== bOn) return aOn - bOn;
 
-      // On-card group: always by title
+      // On-card group: by play_count (most played) or title
       if (a.on_card) {
-        const cmp = a.title.localeCompare(b.title);
+        const cmp = sortBy === 'card_played'
+          ? (a.play_count || 0) - (b.play_count || 0)
+          : a.title.localeCompare(b.title);
         return sortAsc ? cmp : -cmp;
       }
 
@@ -505,6 +507,8 @@ function sortedResults() {
         cmp = va - vb;
       } else if (sortBy === 'card_title') {
         cmp = a.title.localeCompare(b.title);
+      } else if (sortBy === 'card_played') {
+        cmp = (a.play_count || 0) - (b.play_count || 0);
       } else {
         cmp = (a.artist || '').localeCompare(b.artist || '');
         if (cmp === 0) cmp = a.title.localeCompare(b.title);

@@ -392,7 +392,7 @@ def get_card(card_id):
             cur.execute("""
                 SELECT ca.album_id, ca.added_by, ca.accepted,
                        al.title, ar.name AS artist, ar.sort_name, al.year,
-                       al.nas_path, al.is_compilation, al.added_at,
+                       al.nas_path, al.is_compilation, al.added_at, al.play_count,
                        COALESCE(string_agg(DISTINCT g.name, ', ' ORDER BY g.name), '') AS genres
                 FROM card_albums ca
                 JOIN albums al ON al.id = ca.album_id
@@ -401,7 +401,7 @@ def get_card(card_id):
                 LEFT JOIN genres g ON g.id = ag.genre_id
                 WHERE ca.card_id = %s
                 GROUP BY ca.album_id, ca.added_by, ca.accepted,
-                         al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.added_at
+                         al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.added_at, al.play_count
                 ORDER BY ar.sort_name, al.title
             """, (card_id,))
             albums = _enrich_albums([dict(r) for r in cur.fetchall()])
@@ -512,14 +512,14 @@ def search_albums():
         with dict_cursor(conn) as cur:
             cur.execute(f"""
                 SELECT al.id, al.title, ar.name AS artist, al.year,
-                       al.nas_path, al.is_compilation, al.added_at,
+                       al.nas_path, al.is_compilation, al.added_at, al.play_count,
                        COALESCE(string_agg(DISTINCT g.name, ', ' ORDER BY g.name), '') AS genres
                 FROM albums al
                 JOIN artists ar ON ar.id = al.artist_id
                 LEFT JOIN album_genres ag ON ag.album_id = al.id
                 LEFT JOIN genres g ON g.id = ag.genre_id
                 {where}
-                GROUP BY al.id, al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.added_at
+                GROUP BY al.id, al.title, ar.name, ar.sort_name, al.year, al.nas_path, al.is_compilation, al.added_at, al.play_count
                 ORDER BY ar.sort_name, al.title
                 LIMIT %s
             """, params + [limit])
