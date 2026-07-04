@@ -192,6 +192,13 @@ def _run_build(card_id: int, db_params: dict, nas_root: str, stage_path: str,
         if removed:
             _append_log(card_id, f"Removed {removed} orphaned folder(s) from staging.")
 
+        cur.execute("""
+            DELETE FROM card_albums
+            WHERE card_id = %s
+              AND album_id NOT IN (SELECT id FROM albums)
+        """, (card_id,))
+        if cur.rowcount:
+            _append_log(card_id, f"Removed {cur.rowcount} ghost card_album row(s) (album deleted from library).")
         cur.execute("UPDATE cards SET status = 'built', last_built_at = NOW() WHERE id = %s", (card_id,))
         conn.commit()
         _update_job(card_id, status="done", done=total)
