@@ -309,6 +309,16 @@ header h1 { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
 .album-tile.on-card .album-tile-overlay {
   background: linear-gradient(transparent, rgba(20,70,160,.75));
 }
+.album-tile.on-partner-card {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+}
+.album-tile.on-partner-card .album-tile-overlay {
+  background: linear-gradient(transparent, rgba(120,30,30,.75));
+}
+.tile-check.partner-check {
+  background: var(--danger);
+}
 
 /* All tile children must be absolutely positioned inside the padding area */
 .tile-img {
@@ -711,6 +721,29 @@ input:focus, select:focus { border-color: var(--accent); }
   padding: 4px;
   font-size: 12px;
   cursor: pointer;
+}
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity .18s, transform .18s;
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+}
+.toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 /* ── Util ── */

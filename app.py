@@ -156,6 +156,7 @@ def ensure_tables():
             cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_built_at    TIMESTAMPTZ")
             cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS last_modified_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS staging_mode     VARCHAR(10) NOT NULL DEFAULT 'copy'")
+            cur.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS partner_card_id  INTEGER REFERENCES cards(id) ON DELETE SET NULL")
         conn.commit()
 
 
@@ -282,7 +283,7 @@ def list_cards():
             cur.execute("""
                 SELECT c.id, c.name, c.target_size_gb, c.card_mount_path,
                        c.device_profile, c.status, c.created_at,
-                       c.last_built_at, c.last_modified_at,
+                       c.last_built_at, c.last_modified_at, c.partner_card_id,
                        COUNT(ca.album_id) FILTER (WHERE ca.accepted) AS album_count
                 FROM cards c
                 LEFT JOIN card_albums ca ON ca.card_id = c.id
@@ -420,6 +421,12 @@ def get_card(card_id):
             """, (card_id,))
             personal = [dict(r) for r in cur.fetchall()]
 
+            partner_card_name = None
+            if card.get("partner_card_id"):
+                cur.execute("SELECT name FROM cards WHERE id = %s", (card["partner_card_id"],))
+                p = cur.fetchone()
+                partner_card_name = p["name"] if p else None
+
     sp = _stage_path(card)
     album_bytes    = sum(a["size_bytes"] for a in albums if a["accepted"])
     unmanaged_bytes = sum(u["size_bytes"] for u in unmanaged)
@@ -443,10 +450,11 @@ def get_card(card_id):
     result["personal_bytes"]   = personal_bytes
     result["used_bytes"]       = album_bytes + unmanaged_bytes + personal_bytes
     result["target_bytes"]     = _card_target_bytes(float(card["target_size_gb"]))
-    result["stage_path"]       = str(sp) if sp else None
-    result["stage_status"]     = _stage_status(card, sp)
-    result["staging_total"]    = staging_total
-    result["staging_present"]  = staging_present
+    result["stage_path"]        = str(sp) if sp else None
+    result["stage_status"]      = _stage_status(card, sp)
+    result["staging_total"]     = staging_total
+    result["staging_present"]   = staging_present
+    result["partner_card_name"] = partner_card_name
     return jsonify(result)
 
 
@@ -459,11 +467,41 @@ def update_card(card_id):
         if col in data:
             fields.append(f"{col} = %s")
             vals.append(data[col])
-    if not fields:
+
+    has_partner_update = "partner_card_id" in data
+    if not fields and not has_partner_update:
         return jsonify({"error": "nothing to update"}), 400
-    vals.append(card_id)
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if has_partner_update:
+                new_partner = data["partner_card_id"]  # int or None
+                if new_partner:
+                    cur.execute("SELECT id FROM cards WHERE id = %s", (new_partner,))
+                    if not cur.fetchone():
+                        return jsonify({"error": "partner card not found"}), 404
+                # Get current partner so we can clear its back-reference
+                cur.execute("SELECT partner_card_id FROM cards WHERE id = %s", (card_id,))
+                row = cur.fetchone()
+                if row is None:
+                    return jsonify({"error": "not found"}), 404
+                old_partner = row[0]
+                if old_partner and old_partner != new_partner:
+                    cur.execute(
+                        "UPDATE cards SET partner_card_id = NULL WHERE id = %s AND partner_card_id = %s",
+                        (old_partner, card_id),
+                    )
+                if new_partner:
+                    # If new partner already has a different partner, break that link first
+                    cur.execute("SELECT partner_card_id FROM cards WHERE id = %s", (new_partner,))
+                    np_row = cur.fetchone()
+                    if np_row and np_row[0] and np_row[0] != card_id:
+                        cur.execute("UPDATE cards SET partner_card_id = NULL WHERE id = %s", (np_row[0],))
+                    cur.execute("UPDATE cards SET partner_card_id = %s WHERE id = %s", (card_id, new_partner))
+                fields.append("partner_card_id = %s")
+                vals.append(new_partner)
+
+            vals.append(card_id)
             cur.execute(
                 f"UPDATE cards SET {', '.join(fields)} WHERE id = %s RETURNING id",
                 vals,
@@ -528,15 +566,31 @@ def search_albums():
                 row["size_bytes"] = 0
 
             if card_id:
-                cur.execute(
-                    "SELECT album_id FROM card_albums WHERE card_id = %s", (card_id,)
-                )
+                cur.execute("SELECT partner_card_id FROM cards WHERE id = %s", (card_id,))
+                card_row = cur.fetchone()
+                partner_id = card_row["partner_card_id"] if card_row else None
+                partner_name = None
+                partner_album_ids: set = set()
+                if partner_id:
+                    cur.execute("SELECT name FROM cards WHERE id = %s", (partner_id,))
+                    p = cur.fetchone()
+                    partner_name = p["name"] if p else None
+                    cur.execute(
+                        "SELECT album_id FROM card_albums WHERE card_id = %s AND accepted = true",
+                        (partner_id,),
+                    )
+                    partner_album_ids = {r["album_id"] for r in cur.fetchall()}
+                cur.execute("SELECT album_id FROM card_albums WHERE card_id = %s", (card_id,))
                 on_card = {r["album_id"] for r in cur.fetchall()}
                 for row in rows:
                     row["on_card"] = row["id"] in on_card
+                    row["on_partner_card"] = row["id"] not in on_card and row["id"] in partner_album_ids
+                    row["partner_card_name"] = partner_name if row["on_partner_card"] else None
             else:
                 for row in rows:
                     row["on_card"] = False
+                    row["on_partner_card"] = False
+                    row["partner_card_name"] = None
 
             return jsonify(rows)
 

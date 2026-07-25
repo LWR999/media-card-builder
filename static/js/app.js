@@ -540,9 +540,10 @@ function renderTileGrid() {
   el('search-count').textContent = rows.length ? `${rows.length} albums` : 'No results';
 
   for (const r of rows) {
-    const isOnCard = r.on_card || onCardIds.has(r.id);
+    const isOnCard    = r.on_card || onCardIds.has(r.id);
+    const isOnPartner = !isOnCard && r.on_partner_card;
     const tile = document.createElement('div');
-    tile.className = 'album-tile' + (isOnCard ? ' on-card' : '');
+    tile.className = 'album-tile' + (isOnCard ? ' on-card' : isOnPartner ? ' on-partner-card' : '');
     tile.dataset.albumId = r.id;
     tile.title = `${r.artist} – ${r.title}${r.year ? ' ('+r.year+')' : ''}` +
                  `${r.genres ? '\n'+r.genres : ''}`;
@@ -567,6 +568,14 @@ function renderTileGrid() {
           await refreshCard();
           await doSearch();
         } catch (e) { showErr(e.message); }
+      });
+    } else if (isOnPartner) {
+      const chk = document.createElement('div');
+      chk.className = 'tile-check partner-check';
+      chk.textContent = '✓';
+      tile.appendChild(chk);
+      tile.addEventListener('click', () => {
+        showToast(`On ${r.partner_card_name || 'partner card'}`);
       });
     } else {
       tile.addEventListener('click', async () => {
@@ -820,8 +829,22 @@ function fmtDur(s) {
   return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
 }
 
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.className = 'toast visible';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toast.classList.remove('visible'), 2500);
+}
+
 // ── Card settings modal ────────────────────────────────────────────────────
-el('btn-card-settings').addEventListener('click', () => {
+el('btn-card-settings').addEventListener('click', async () => {
   if (!activeCard) return;
   el('cfg-name').value          = activeCard.name;
   el('cfg-size').value          = activeCard.target_size_gb;
@@ -829,21 +852,39 @@ el('btn-card-settings').addEventListener('click', () => {
   el('cfg-stage').value         = activeCard.stage_path || '(NAS_STAGE_PATH not configured)';
   el('cfg-profile').value       = activeCard.device_profile || 'generic';
   el('cfg-staging-mode').value  = activeCard.staging_mode || 'copy';
+
+  const partnerSel = el('cfg-partner-card');
+  partnerSel.innerHTML = '<option value="">None</option>';
+  try {
+    const allCards = await api('GET', '/api/cards');
+    for (const c of allCards) {
+      if (c.id === activeCardId) continue;
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (c.id === activeCard.partner_card_id) opt.selected = true;
+      partnerSel.appendChild(opt);
+    }
+  } catch (_) {}
+
   el('modal-card-settings').classList.remove('hidden');
 });
 
 el('btn-save-settings').addEventListener('click', async () => {
   try {
+    const partnerVal = el('cfg-partner-card').value;
     await api('PATCH', `/api/cards/${activeCardId}`, {
       name:            el('cfg-name').value.trim(),
       target_size_gb:  parseFloat(el('cfg-size').value),
       card_mount_path: el('cfg-output').value.trim(),
       device_profile:  el('cfg-profile').value,
       staging_mode:    el('cfg-staging-mode').value,
+      partner_card_id: partnerVal ? parseInt(partnerVal) : null,
     });
     el('modal-card-settings').classList.add('hidden');
     await loadCards();
     await refreshCard();
+    await doSearch();
   } catch (e) { showErr(e.message); }
 });
 
