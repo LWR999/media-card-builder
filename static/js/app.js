@@ -11,6 +11,8 @@ let searchTimer  = null;
 let currentResults = [];
 let sortBy  = 'added';
 let sortAsc = false;
+let savedScrollTop = 0;
+let wasFiltered    = false;
 let cardSortBy  = 'artist';
 let cardSortAsc = true;
 
@@ -171,6 +173,8 @@ async function loadCards() {
 // ── Select / load card ─────────────────────────────────────────────────────
 async function selectCard(id) {
   activeCardId = id;
+  savedScrollTop = 0;
+  wasFiltered    = false;
   document.querySelectorAll('#card-list li').forEach(li =>
     li.classList.toggle('active', Number(li.dataset.id) === id)
   );
@@ -612,6 +616,7 @@ async function doSearch() {
   const q      = el('search-q').value.trim();
   const artist = el('search-artist').value.trim();
   const genre  = el('search-genre').value.trim();
+  const isFiltered = !!(q || artist || genre);
   try {
     const params = new URLSearchParams({ limit: 20000 });
     if (q)      params.set('q', q);
@@ -619,7 +624,10 @@ async function doSearch() {
     if (genre)  params.set('genre', genre);
     if (activeCardId) params.set('card_id', activeCardId);
     currentResults = await api('GET', `/api/albums/search?${params}`);
+    if (isFiltered && !wasFiltered) savedScrollTop = el('search-results').scrollTop;
+    wasFiltered = isFiltered;
     renderTileGrid();
+    if (!isFiltered && savedScrollTop) el('search-results').scrollTop = savedScrollTop;
   } catch (e) { showErr(e.message); }
 }
 
