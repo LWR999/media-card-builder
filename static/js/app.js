@@ -616,7 +616,9 @@ async function doSearch() {
   const q      = el('search-q').value.trim();
   const artist = el('search-artist').value.trim();
   const genre  = el('search-genre').value.trim();
-  const isFiltered = !!(q || artist || genre);
+  const isFiltered    = !!(q || artist || genre);
+  const wasFilteredNow = wasFiltered;
+  const grid = el('search-results');
   try {
     const params = new URLSearchParams({ limit: 20000 });
     if (q)      params.set('q', q);
@@ -624,10 +626,21 @@ async function doSearch() {
     if (genre)  params.set('genre', genre);
     if (activeCardId) params.set('card_id', activeCardId);
     currentResults = await api('GET', `/api/albums/search?${params}`);
-    if (isFiltered && !wasFiltered) savedScrollTop = el('search-results').scrollTop;
+    const scrollNow = grid.scrollTop;
     wasFiltered = isFiltered;
-    renderTileGrid();
-    if (!isFiltered && savedScrollTop) el('search-results').scrollTop = savedScrollTop;
+    if (isFiltered && !wasFilteredNow) {
+      // Unfiltered → filtered: save position, show filtered results from top
+      savedScrollTop = scrollNow;
+      renderTileGrid();
+    } else if (!isFiltered && wasFilteredNow) {
+      // Filtered → unfiltered: restore pre-filter position
+      renderTileGrid();
+      grid.scrollTop = savedScrollTop;
+    } else {
+      // No filter change (tile click, refresh, etc.): stay where we are
+      renderTileGrid();
+      grid.scrollTop = scrollNow;
+    }
   } catch (e) { showErr(e.message); }
 }
 
