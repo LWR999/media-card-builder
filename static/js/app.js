@@ -487,19 +487,19 @@ function sortedResults() {
   return [...currentResults].sort((a, b) => {
     // Card-aware sorts: on-card albums first (by title), then off-card by secondary criterion
     if (sortBy === 'card_date' || sortBy === 'card_title' || sortBy === 'card_artist' || sortBy === 'card_played') {
-      const aOn = a.on_card ? 0 : 1;
-      const bOn = b.on_card ? 0 : 1;
-      if (aOn !== bOn) return aOn - bOn;
+      const bucket = r => r.on_card ? 0 : r.on_partner_card ? 2 : 1;
+      const aB = bucket(a), bB = bucket(b);
+      if (aB !== bB) return aB - bB;
 
-      // On-card group: by play_count (most played) or title
-      if (a.on_card) {
+      // On-card group: by play_count or title
+      if (aB === 0) {
         const cmp = sortBy === 'card_played'
           ? (a.play_count || 0) - (b.play_count || 0)
           : a.title.localeCompare(b.title);
         return sortAsc ? cmp : -cmp;
       }
 
-      // Off-card group: secondary criterion
+      // Available and partner groups: secondary criterion
       let cmp;
       if (sortBy === 'card_date') {
         const va = a.added_at ? new Date(a.added_at).getTime() : 0;
